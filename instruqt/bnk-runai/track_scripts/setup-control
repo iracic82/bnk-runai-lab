@@ -40,6 +40,11 @@ step() { echo "==== $(date +%H:%M:%S) $*"; }
   bash "$LAB_ROOT/platform/dynamo/install.sh"
   step "MCP servers: NVIDIA runai-mcp-server + bnk-tenancy-mcp"
   bash "$LAB_ROOT/platform/mcp/install.sh"
+  # The agent's LLM key, from the Instruqt secret, readable by root only. No key: challenge 6 uses demo.sh.
+  if [ -n "${LLM_API_KEY:-}" ]; then
+    install -d -m 700 /root/.config/lab
+    ( umask 077; printf 'LLM_API_KEY=%s\n' "$LLM_API_KEY" > /root/.config/lab/llm.env )
+  fi
   step "Prometheus + Grafana"
   bash "$LAB_ROOT/platform/observability/install.sh"
   step "interactive lab topology"

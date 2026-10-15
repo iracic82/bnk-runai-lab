@@ -107,17 +107,26 @@ by side. One is NVIDIA's own Run:ai MCP server, which can create and manage Run:
 is `bnk-tenancy-mcp` from this repo, which answers what BNK built for a project: its address, its rate
 limit and the tokens it has used.
 
-The demo script plays the agent. Every step is a plain MCP message over HTTP, the same thing Claude or
-any other MCP client would send. It asks Run:ai for a new project called `agent-demo` with one GPU,
-first as a dry run so nothing changes, then for real. After that it only asks BNK questions.
+The agent in `platform/mcp/agent.py` is about 250 lines of plain Python. It gives both servers' tools to
+an LLM and lets the LLM decide what to call. Here the LLM is NVIDIA Nemotron on build.nvidia.com, but
+any OpenAI-compatible model works the same way: change `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY`.
+
+Ask it for a tenant in plain English:
+
+```bash,run
+python3 /root/lab/platform/mcp/agent.py "Create a Run:ai project called agent-demo with 1 GPU and tell me its BNK endpoint"
+```
+
+Watch the tool calls go by. The agent looks up the node pool and the department, then asks Run:ai for
+a dry run, which changes nothing. Before the real change it stops and shows you what it is about to do.
+Type `y` to approve. After that it only asks BNK questions, and its answer ends with the VIP, the rate
+limit of 20 req/s from the one GPU, and a token count of 0.
+
+If the agent can't reach its LLM, the same steps run without one:
 
 ```bash,run
 bash /root/lab/platform/mcp/demo.sh agent-demo 1
 ```
-
-You should see the dry run preview, then `applied=true` with a Run:ai project id. A few seconds later
-the BNK side answers with a VIP, `Programmed True`, a rate limit of 20 req/s from the one GPU, and a
-token count of 0 because nothing has called it yet.
 
 The agent never touched BNK. It asked Run:ai for a tenant, and the tenancy controller did the rest,
 exactly as it did for `tenant-a` and `tenant-b`. Look at the **Run:ai UI** tab and `agent-demo` is

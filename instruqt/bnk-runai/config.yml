@@ -31,7 +31,8 @@ virtualmachines:
   machine_type: n2-standard-16
   shell: /bin/bash
 # Team secrets (write only): FAR_PULL_B64 F5 registry credential, BNK_LICENSE_JWT licence,
-# GH_READ_TOKEN read-only token for the private lab repo.
+# GH_READ_TOKEN read-only token for the private lab repo, LLM_API_KEY NVIDIA API key (build.nvidia.com)
+# for the MCP agent in challenge 6.
 secrets:
 - name: FAR_PULL_B64
   key: FAR_PULL_B64
@@ -39,3 +40,5 @@ secrets:
   key: BNK_LICENSE_JWT
 - name: GH_READ_TOKEN
   key: GH_READ_TOKEN
+- name: LLM_API_KEY
+  key: LLM_API_KEY
