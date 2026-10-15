@@ -3,7 +3,8 @@ slug: debrief
 id: tvwvrxmzsupm
 type: challenge
 title: What you built, and what's next
-teaser: A recap of the integration, what in this lab is real and what is simulated, and what changes on a real BlueField-3 DPU.
+teaser: A recap of the integration, what in this lab is real and what is simulated,
+  and what changes on a real BlueField-3 DPU.
 notes:
 - type: image
   url: ../assets/notes-06.png
@@ -12,7 +13,8 @@ tabs:
   title: Terminal
   type: terminal
   hostname: control
-- title: Topology
+- id: jdnyh35xvg8q
+  title: Topology
   type: service
   hostname: control
   path: /topology.html
@@ -35,7 +37,7 @@ tabs:
   path: /root/lab
 difficulty: basic
 timelimit: 900
-enhanced_loading:
+enhanced_loading: null
 ---
 ![What you built](../assets/06-recap.png)
 
