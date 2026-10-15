@@ -120,6 +120,16 @@ func (a *Applier) mustOwn(ctx context.Context, o *unstructured.Unstructured, pro
 // VIP on hold. Kinds whose CRD is missing are skipped, so a half-installed BNK never blocks a Run:ai
 // project deletion.
 func (a *Applier) Delete(ctx context.Context, project string) error {
+	// The pool lives in the tenant namespace; remember it so the copied registry secret goes too.
+	pools := &unstructured.UnstructuredList{}
+	pools.SetGroupVersionKind(PoolGVK.GroupVersion().WithKind("InferencePoolList"))
+	if err := a.Client.List(ctx, pools, client.MatchingLabels{LabelProject: project, LabelManagedBy: ManagedBy}); err == nil {
+		for _, p := range pools.Items {
+			if err := a.DeletePullSecret(ctx, p.GetNamespace()); err != nil {
+				return fmt.Errorf("delete registry secret in %s: %w", p.GetNamespace(), err)
+			}
+		}
+	}
 	for _, gvk := range OwnedKinds {
 		list := &unstructured.UnstructuredList{}
 		list.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
@@ -137,6 +147,28 @@ func (a *Applier) Delete(ctx context.Context, project string) error {
 		}
 	}
 	return a.releaseVIP(ctx, project)
+}
+
+// DeletePullSecret removes the registry secret this controller copied into a tenant namespace.
+func (a *Applier) DeletePullSecret(ctx context.Context, ns string) error {
+	if a.Config.PullSecret == "" || !tenantNamespace.MatchString(ns) {
+		return nil
+	}
+	cur := &corev1.Secret{}
+	err := a.Client.Get(ctx, client.ObjectKey{Namespace: ns, Name: a.Config.PullSecret}, cur)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if cur.Labels[LabelManagedBy] != ManagedBy {
+		return nil
+	}
+	if err := a.Client.Delete(ctx, cur); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
 }
 
 // Projects returns every Run:ai project that has a managed tenant Gateway, so the reconciler can

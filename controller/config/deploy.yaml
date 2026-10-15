@@ -28,7 +28,11 @@ rules:
   # only ever writes the one secret name, labelled managed-by bnk-runai-tenancy.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["create", "patch"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["far-pull-secret"]
+    verbs: ["get", "patch", "delete"]
   - apiGroups: ["", "events.k8s.io"]
     resources: ["events"]
     verbs: ["create", "patch"]
@@ -104,7 +108,7 @@ spec:
       securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: manager
-          image: docker.io/iracic82/bnk-runai-tenancy:0.1.4
+          image: docker.io/iracic82/bnk-runai-tenancy:0.1.5
           imagePullPolicy: Always
           args: ["--leader-elect", "--bnk-namespace=f5-bnk", "--vip-range=172.16.201.110-172.16.201.149"]
           # Token metering (config/meter.yaml): add

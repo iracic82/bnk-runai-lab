@@ -320,6 +320,12 @@ func TestApplyCopiesPullSecretIntoTenantNamespace(t *testing.T) {
 	if got.Type != corev1.SecretTypeDockerConfigJson || string(got.Data[".dockerconfigjson"]) != "{}" {
 		t.Errorf("copied secret = %+v", got)
 	}
+	if err := a.DeletePullSecret(ctx, "runai-tenant-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Client.Get(ctx, client.ObjectKey{Namespace: "runai-tenant-a", Name: "far-pull-secret"}, &corev1.Secret{}); err == nil {
+		t.Error("copied secret should be removed with the tenant")
+	}
 	for _, bad := range []string{"f5-bnk", "kube-system", "default", "runai"} {
 		if err := a.copyPullSecret(ctx, bad); err == nil {
 			t.Errorf("must refuse to write the registry secret into %q", bad)
@@ -331,6 +337,12 @@ func TestApplyCopiesPullSecretIntoTenantNamespace(t *testing.T) {
 	}
 	if err := a.copyPullSecret(ctx, "runai-tenant-b"); err == nil {
 		t.Error("must not overwrite a secret it does not manage")
+	}
+	if err := a.DeletePullSecret(ctx, "runai-tenant-b"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Client.Get(ctx, client.ObjectKey{Namespace: "runai-tenant-b", Name: "far-pull-secret"}, &corev1.Secret{}); err != nil {
+		t.Error("must never delete a secret it does not manage")
 	}
 	a.Config.PullSecret = ""
 	if err := a.copyPullSecret(ctx, "runai-other"); err != nil {
