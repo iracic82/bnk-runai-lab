@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"os"
 
@@ -17,12 +16,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	"github.com/f5devcentral/bnk-runai-tenancy/internal/bnk"
 	"github.com/f5devcentral/bnk-runai-tenancy/internal/reconcile"
 )
-
-// errNoBNK is returned until the BNK 2.4 applier exists. The BNK object names are written only
-// after they are verified on a running cluster (docs/verified-names.md, spike task T008).
-var errNoBNK = errors.New("BNK applier not built yet: run with --dry-run until the spike verifies BNK 2.4 names")
 
 // dryRunApplier logs what it would write. It lets the controller run against a real Run:ai
 // install before the BNK side exists.
@@ -40,11 +36,6 @@ func (dryRunApplier) Delete(ctx context.Context, project string) error {
 	return nil
 }
 
-type unavailableApplier struct{}
-
-func (unavailableApplier) Apply(context.Context, reconcile.Desired) error { return errNoBNK }
-func (unavailableApplier) Delete(context.Context, string) error           { return errNoBNK }
-
 type tenantState struct{ g *prometheus.GaugeVec }
 
 func (s tenantState) Set(project, state string) {
@@ -59,12 +50,18 @@ func main() {
 	var (
 		metricsAddr, probeAddr string
 		leaderElect, dryRun    bool
+		bnkCfg                 = bnk.DefaultConfig()
+		vipRange               string
 		policy                 = reconcile.DefaultPolicy()
 	)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "metrics endpoint")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "health probe endpoint")
 	flag.BoolVar(&leaderElect, "leader-elect", false, "enable leader election")
 	flag.BoolVar(&dryRun, "dry-run", false, "log BNK changes instead of applying them")
+	flag.StringVar(&bnkCfg.Namespace, "bnk-namespace", bnkCfg.Namespace, "namespace of BNK gateways and iRules")
+	flag.StringVar(&bnkCfg.GatewayClass, "gateway-class", bnkCfg.GatewayClass, "GatewayClass served by BNK")
+	flag.StringVar(&bnkCfg.Tokenizer, "tokenizer", bnkCfg.Tokenizer, "tokenizer for the Endpoint Picker's prefix-cache scorer")
+	flag.StringVar(&vipRange, "vip-range", "172.16.201.110-172.16.201.149", "addresses tenant gateways are served from")
 	flag.Float64Var(&policy.BaseRPS, "base-rps", policy.BaseRPS, "requests/s per deserved GPU")
 	flag.Float64Var(&policy.MinGPUFactor, "min-gpu-factor", policy.MinGPUFactor, "GPU floor for projects without a GPU quota")
 	var threshold int
@@ -101,7 +98,12 @@ func main() {
 	}, []string{"project", "state"})
 	crmetrics.Registry.MustRegister(state)
 
-	var applier reconcile.BundleApplier = unavailableApplier{}
+	vips, err := bnk.ParseVIPRange(vipRange)
+	if err != nil {
+		log.Error(err, "vip-range")
+		os.Exit(1)
+	}
+	var applier reconcile.BundleApplier = &bnk.Applier{Client: mgr.GetClient(), Config: bnkCfg, VIPs: vips}
 	if dryRun {
 		applier = dryRunApplier{}
 	}
