@@ -1,34 +1,41 @@
 ---
 slug: isolation-before-the-gpu
+id: 7mtupreqvpsj
 type: challenge
 title: Isolation before the GPU
-teaser: One tenant floods its endpoint. BNK refuses the excess with a 429 before it reaches the GPU both tenants share, and the other tenant never notices.
+teaser: One tenant floods its endpoint. BNK refuses the excess with a 429 before it
+  reaches the GPU both tenants share, and the other tenant never notices.
 notes:
 - type: image
   url: ../assets/notes-03.png
 tabs:
-- title: Terminal
+- id: bhh8k4kivz5u
+  title: Terminal
   type: terminal
   hostname: control
-- title: Terminal 2
+- id: eykzarcwdwmo
+  title: Terminal 2
   type: terminal
   hostname: control
-- title: Grafana
+- id: culm8euqfpu6
+  title: Grafana
   type: service
   hostname: control
   path: /d/one-tenant-two-planes?orgId=1&kiosk
   port: 3000
-- title: Run:ai UI
+- id: kykrf8yyuawt
+  title: Run:ai UI
   type: service
   hostname: control
   port: 3001
-- title: Lab code
+- id: lzkutf2hflrw
+  title: Lab code
   type: code
   hostname: control
   path: /root/lab
 difficulty: intermediate
 timelimit: 1800
-enhanced_loading:
+enhanced_loading: null
 ---
 `tenant-a` and `tenant-b` share one GPU, half each. A GPU has no idea which tenant a request came
 from: it serves whatever arrives. If `tenant-b` sends ten times its fair load, `tenant-a`'s requests

@@ -1,31 +1,37 @@
 ---
 slug: tokens-per-project
+id: b4dv4wqs5rjq
 type: challenge
 title: Tokens per project
-teaser: BNK counts tokens per Run:ai project at the edge, shows them next to GPU share, and writes the totals back onto the Run:ai project and its department.
+teaser: BNK counts tokens per Run:ai project at the edge, shows them next to GPU share,
+  and writes the totals back onto the Run:ai project and its department.
 notes:
 - type: image
   url: ../assets/notes-04.png
 tabs:
-- title: Terminal
+- id: yxo0y5hhhrnp
+  title: Terminal
   type: terminal
   hostname: control
-- title: Grafana
+- id: rcoyhpiujcvt
+  title: Grafana
   type: service
   hostname: control
   path: /d/one-tenant-two-planes?orgId=1&kiosk
   port: 3000
-- title: Run:ai UI
+- id: xi47eeaxmw4y
+  title: Run:ai UI
   type: service
   hostname: control
   port: 3001
-- title: Lab code
+- id: ejaxdecsy0g4
+  title: Lab code
   type: code
   hostname: control
   path: /root/lab
 difficulty: intermediate
 timelimit: 1500
-enhanced_loading:
+enhanced_loading: null
 ---
 Run:ai can tell you how much GPU each project was given. It cannot tell you how many tokens each
 project actually consumed, because tokens live in the request and response, not in the scheduler.

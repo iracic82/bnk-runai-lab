@@ -1,31 +1,37 @@
 ---
 slug: tenant-defined-once
+id: aeo17zofe3hu
 type: challenge
 title: Define a tenant once
-teaser: Create two projects in Run:ai and watch BNK build a front door, a rate limit and a route for each, with nothing configured in BNK by hand.
+teaser: Create two projects in Run:ai and watch BNK build a front door, a rate limit
+  and a route for each, with nothing configured in BNK by hand.
 notes:
 - type: image
   url: ../assets/notes-02.png
 tabs:
-- title: Terminal
+- id: nedmowgcjf6q
+  title: Terminal
   type: terminal
   hostname: control
-- title: Run:ai UI
+- id: azt7df3mf1qv
+  title: Run:ai UI
   type: service
   hostname: control
   port: 3001
-- title: Grafana
+- id: leroz7dq1bci
+  title: Grafana
   type: service
   hostname: control
   path: /d/one-tenant-two-planes?orgId=1&kiosk
   port: 3000
-- title: Lab code
+- id: tquof3svfz5g
+  title: Lab code
   type: code
   hostname: control
   path: /root/lab
 difficulty: basic
 timelimit: 1800
-enhanced_loading:
+enhanced_loading: null
 ---
 In Run:ai, a **project** is the tenant: it owns a GPU quota, a priority and a namespace. In this
 challenge you create two projects and never touch BNK. The tenancy controller reads each project and
