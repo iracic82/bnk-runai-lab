@@ -21,7 +21,7 @@ rules:
     verbs: ["get", "list", "watch"]
   # BNK side: the tenant objects it renders (Gateway API, GAIE, F5 EPP, iRule, NetPolicy).
   - apiGroups: ["gateway.networking.k8s.io", "inference.networking.k8s.io", "inference.k8s.f5.com", "k8s.f5net.com", "gateway.k8s.f5.com"]
-    resources: ["gateways", "httproutes", "inferencepools", "f5epps", "f5bigcneirules", "netpolicies"]
+    resources: ["gateways", "httproutes", "inferencepools", "f5-epps", "f5-big-cne-irules", "netpolicies"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["", "events.k8s.io"]
     resources: ["events"]
