@@ -2,7 +2,7 @@
 # Idempotent: labctl applies, so re-running converges on the same state.
 export KUBECONFIG=/etc/kubernetes/admin.conf
 set -e
-labctl tenant create tenant-a --gpu 2 --priority 150 --department acme
+labctl tenant create tenant-a --gpu 2 --priority 150
 labctl tenant create tenant-b --gpu 0.5 --priority 50
 labctl model deploy tenant-a --fraction 0.5
 labctl model deploy tenant-b --fraction 0.5

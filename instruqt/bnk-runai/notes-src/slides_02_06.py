@@ -56,7 +56,7 @@ def arrow(label, cls="", glyph="&rarr;"):
 
 def tenant_flow() -> str:
     runai = '<div class="col" style="width:300px">' + box(
-        "nv", "Run:ai project tenant-a", "department <b>acme</b><br>GPU quota <b>2</b><br>priority <b>150</b>",
+        "nv", "Run:ai project tenant-a", "department <b>default</b><br>GPU quota <b>2</b><br>priority <b>150</b>",
         "kai.resources") + box(
         "nv", "Run:ai project tenant-b", "department <b>default</b><br>GPU quota <b>0.5</b><br>priority <b>50</b>",
         "kai.resources") + '</div>'
@@ -134,7 +134,7 @@ def metering() -> str:
         "gy", "Prometheus + Grafana", "dashboard <b>One tenant, two planes</b><br>tokens per project, per department, per GPU",
         "node: control") + box(
         "nv", "Write-back to Run:ai", "Project tenant-a<br><span class='mono'>tenancy.f5.com/tokens-total</span><br>"
-        "Department acme: sum of its projects", "kai.resources") + '</div>'
+        "Department default: sum of its projects", "kai.resources") + '</div>'
     body = ('<div class="row">' + req + arrow("response") + edge + arrow("counts") + meter
             + arrow("scrape<br>+ annotate") + outs + '</div>'
             '<div class="legend">Tokens are counted where every request already passes: the BNK edge. Run:ai sees the '

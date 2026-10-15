@@ -48,13 +48,32 @@ writes the BNK objects that serve it.
 This is the point of the integration for a Run:ai team: the platform owner keeps defining tenants in
 the tool they already use, and the network follows.
 
-# Step 1: Create two Run:ai projects
+# Step 1: Create a tenant in the Run:ai UI
 
-`tenant-a` belongs to department `acme`, gets 2 GPUs and a high priority. `tenant-b` gets half a GPU and
-a low priority.
+Start the way a Run:ai admin would. In the **Run:ai UI** tab (sign in as `admin@acme.lab` /
+`Lab-Admin-1!`):
+
+1. **Organization → Projects → NEW PROJECT**.
+2. Department `default`, name `tenant-a`. Leave the namespace empty; Run:ai creates `runai-tenant-a`.
+3. **GPU quota**: `2` GPUs on the `default` node pool.
+4. **SAVE & CONTINUE** through the remaining steps, then **CREATE PROJECT**.
+
+Now watch BNK follow. You have not touched BNK, and you will not:
 
 ```bash,run
-labctl tenant create tenant-a --gpu 2 --priority 150 --department acme
+until kubectl get projects.kai.resources tenant-a -o jsonpath='{.status.phase}' 2>/dev/null | grep -q Ready; do sleep 3; done
+kubectl get projects.kai.resources tenant-a -o jsonpath='{.status.phase} {.status.namespace}{"\n"}'
+sleep 20; kubectl get gateways -n f5-bnk -o wide
+```
+
+`tenant-a` has its own Gateway, programmed on its own address, about half a minute after you clicked
+create.
+
+Give it a high priority and create a second tenant from the terminal. `labctl` uses the same Run:ai
+API the UI does:
+
+```bash,run
+labctl tenant create tenant-a --gpu 2 --priority 150
 labctl tenant create tenant-b --gpu 0.5 --priority 50
 ```
 
