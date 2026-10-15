@@ -44,6 +44,12 @@ func TestRenderPlacesObjects(t *testing.T) {
 	if addrs[0].(map[string]any)["value"] != "172.16.201.110" {
 		t.Errorf("gateway address = %v", addrs)
 	}
+	ls, _, _ := unstructured.NestedSlice(gw.Object, "spec", "listeners")
+	from, _, _ := unstructured.NestedString(ls[0].(map[string]any), "allowedRoutes", "namespaces", "from")
+	only, _, _ := unstructured.NestedString(ls[0].(map[string]any), "allowedRoutes", "namespaces", "selector", "matchLabels", "kubernetes.io/metadata.name")
+	if from != "Selector" || only != "runai-tenant-a" {
+		t.Errorf("gateway must accept routes only from runai-tenant-a, got from=%q selector=%q", from, only)
+	}
 }
 
 func TestLimitIRule(t *testing.T) {

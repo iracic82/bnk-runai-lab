@@ -80,8 +80,13 @@ func Render(cfg Config, d reconcile.Desired, vip string) []*unstructured.Unstruc
 		"addresses":        []any{map[string]any{"type": "IPAddress", "value": vip}},
 		"listeners": []any{map[string]any{
 			"name": "http", "protocol": "HTTP", "port": cfg.ListenPort,
-			// Proven setting on BNK 2.4; the route lives in the tenant namespace.
-			"allowedRoutes": map[string]any{"namespaces": map[string]any{"from": "All"}},
+			// Only the tenant's own namespace may attach routes, so one Run:ai project can never
+			// publish behind another's front door. kubernetes.io/metadata.name is set on every
+			// namespace by the API server.
+			"allowedRoutes": map[string]any{"namespaces": map[string]any{
+				"from":     "Selector",
+				"selector": map[string]any{"matchLabels": map[string]any{"kubernetes.io/metadata.name": t.Namespace}},
+			}},
 		}},
 	}
 
