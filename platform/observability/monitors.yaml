@@ -89,24 +89,25 @@ spec:
           expr: max by (project, department) (runai_project_gpu_allocated)
         - record: department:gpu_deserved:sum
           expr: sum by (department) (project:gpu_deserved:sum)
-        # BNK side: requests by response code and tokens by direction/source (contracts/metrics.md).
+        # BNK side: requests by response code and tokens by direction (contracts/metrics.md).
         - record: project_code:bnk_requests:rate1m
           expr: sum by (project, department, code) (rate(bnk_requests_total[1m]))
         - record: project:bnk_tokens:rate1m
           expr: sum by (project, department) (rate(bnk_tokens_total[1m]))
-        - record: project_source:bnk_tokens:rate1m
-          expr: sum by (project, source, direction) (rate(bnk_tokens_total[1m]))
+        - record: project_direction:bnk_tokens:rate1m
+          expr: sum by (project, direction) (rate(bnk_tokens_total[1m]))
         # Fallback that needs no meter: tokens counted by the model servers themselves.
         - record: project:model_tokens:rate1m
           expr: |
             sum by (project) (rate(vllm:prompt_tokens_total[1m]))
             + sum by (project) (rate(vllm:generation_tokens_total[1m]))
-        # Tokens per GPU of quota: what one deserved GPU of each tenant turns into.
+        # Tokens per GPU of quota: what one deserved GPU of each tenant turns into. No quota, no value
+        # (dividing by a floor would print an invented, inflated number).
         - record: project:bnk_tokens_per_gpu:rate1m
           expr: |
             sum by (project) (project:bnk_tokens:rate1m)
-            / on (project) clamp_min(sum by (project) (project:gpu_deserved:sum), 0.01)
+            / on (project) (sum by (project) (project:gpu_deserved:sum) > 0)
         - record: project:model_tokens_per_gpu:rate1m
           expr: |
             project:model_tokens:rate1m
-            / on (project) clamp_min(sum by (project) (project:gpu_deserved:sum), 0.01)
+            / on (project) (sum by (project) (project:gpu_deserved:sum) > 0)

@@ -95,7 +95,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "GPU quota by department (Run:ai)",
-      "description": "Department quota (kai.resources Department) and the sum of its projects' deserved GPUs (kai.resources Project), via kube-state-metrics.",
+      "description": "The department's own GPU quota (kai.resources Department) and the sum of its projects' deserved GPUs (kai.resources Project), both read by kube-state-metrics from the Run:ai objects.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -112,7 +112,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "department:gpu_deserved:sum",
+          "expr": "sum by (department) (runai_department_gpu_deserved)",
           "legendFormat": "{{department}} quota",
           "refId": "A",
           "range": true
@@ -702,7 +702,7 @@
       "id": 10,
       "type": "timeseries",
       "title": "Tokens/s",
-      "description": "bnk_tokens_total by direction; the source label says where tokens were counted (gateway or model-server). The vLLM series are the model servers' own counters for comparison.",
+      "description": "bnk_tokens_total by direction, counted by the tenant iRule in TMM from each answer's usage field. The model server's own counters are drawn next to it so the two can be compared.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -719,8 +719,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (direction, source) (rate(bnk_tokens_total{project=\"$project\"}[1m]))",
-          "legendFormat": "{{direction}} ({{source}})",
+          "expr": "sum by (direction) (rate(bnk_tokens_total{project=\"$project\"}[1m]))",
+          "legendFormat": "{{direction}} (metered at BNK)",
           "refId": "A",
           "range": true
         },
@@ -730,7 +730,7 @@
             "uid": "${datasource}"
           },
           "expr": "sum(rate(vllm:prompt_tokens_total{project=\"$project\"}[1m]))",
-          "legendFormat": "prompt (vLLM counters)",
+          "legendFormat": "prompt (model server counter)",
           "refId": "B",
           "range": true
         },
@@ -740,7 +740,7 @@
             "uid": "${datasource}"
           },
           "expr": "sum(rate(vllm:generation_tokens_total{project=\"$project\"}[1m]))",
-          "legendFormat": "completion (vLLM counters)",
+          "legendFormat": "completion (model server counter)",
           "refId": "C",
           "range": true
         }
@@ -775,7 +775,7 @@
       "id": 11,
       "type": "timeseries",
       "title": "Tokens per GPU of quota",
-      "description": "rate(bnk_tokens_total) / the project's deserved GPUs: what one GPU of this tenant's quota is producing.",
+      "description": "rate(bnk_tokens_total) / the project's deserved GPUs. Empty for a project with no GPU quota.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1107,7 +1107,7 @@
       "id": 16,
       "type": "timeseries",
       "title": "vLLM: TTFT p50 / p95",
-      "description": "Time to first token at the model servers.",
+      "description": "Time to first token at the model servers. Measured by the model server per request. In this lab that is vllm-twin, which serves every request for real but has no GPU, so its prefill and decode time follow its configured timing instead of GPU compute.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
