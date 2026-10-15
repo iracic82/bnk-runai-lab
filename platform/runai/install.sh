@@ -29,7 +29,8 @@ git -C "$RUNAI_SRC" checkout -q "$RUNAI_REF"
 
 # Load local-dev.sh's functions and settings without running its main(). Its arg parser loops over
 # "$@", so it is sourced with no arguments; REPO_ROOT resolves to the clone.
-_ld="$(mktemp)"; sed '$d' "${RUNAI_SRC}/local-dev.sh" > "$_ld"   # last line is: main "$@"
+# The copy lives inside the clone: local-dev.sh derives REPO_ROOT (chart paths) from its own location.
+_ld="${RUNAI_SRC}/.lab-local-dev-functions.sh"; sed '$d' "${RUNAI_SRC}/local-dev.sh" > "$_ld"   # last line is: main "$@"
 set --
 # shellcheck disable=SC1090
 . "$_ld"; rm -f "$_ld"
@@ -42,7 +43,6 @@ step "ingress-nginx on the runai node (the Run:ai UI and API sit behind it)"
 kubectl apply -f "https://raw.githubusercontent.com/kubernetes/ingress-nginx/${INGRESS_NGINX_VERSION}/deploy/static/provider/baremetal/deploy.yaml"
 kubectl -n ingress-nginx patch deploy ingress-nginx-controller --type merge -p '{"spec":{"template":{"spec":{
   "nodeSelector":{"app":"runai-control-plane"},
-  "tolerations":[{"key":"dedicated","operator":"Equal","value":"runai-control-plane","effect":"NoSchedule"}],
   "hostNetwork":true,"dnsPolicy":"ClusterFirstWithHostNet"}}}}'
 kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=300s
 RUNAI_NODE_IP="$(kubectl get node runai -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')"
@@ -63,18 +63,8 @@ step "Run:ai control plane (images from ${RUNAI_IMAGE_REGISTRY})"
 # deploy_control_plane passes global.image.registry=localhost:${REGISTRY_PORT}/${LOCAL_IMAGE_REPO};
 # rewrite that one argument, then pin the whole release to the runai node.
 eval "$(declare -f deploy_control_plane | sed "s#\"localhost:\${REGISTRY_PORT}/\${LOCAL_IMAGE_REPO}\"#\"${RUNAI_IMAGE_REGISTRY}\"#")"
-cat > /root/values-runai-node.yaml <<'EOF'
-global:
-  nodeSelector:
-    app: runai-control-plane
-  tolerations:
-  - key: dedicated
-    operator: Equal
-    value: runai-control-plane
-    effect: NoSchedule
-EOF
-# Add the node pinning to the values local-dev.sh already passes.
-cat /root/values-runai-node.yaml >> "${REPO_ROOT}/.local-dev/values-cp.yaml"
+# The control plane's subcharts (Postgres, Keycloak, NATS) don't take a global nodeSelector, so the
+# release is not pinned; the runai node adds capacity for it and the scheduler spreads the pods.
 deploy_control_plane
 
 step "register this cluster in the control plane (NVIDIA local-dev functions)"

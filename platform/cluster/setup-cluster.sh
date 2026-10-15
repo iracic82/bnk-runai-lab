@@ -193,9 +193,9 @@ step "labelling nodes: dpu runs TMM, gpu runs model pods (fake GPUs), runai runs
 # labelled app=workload instead, which is where the sims, Prometheus and Grafana land.
 kubectl label node dpu    app=f5-tmm  --overwrite
 kubectl label node gpu    app=workload run.ai/simulated-gpu-node-pool=default --overwrite
+# The runai node adds capacity for the Run:ai control plane (about 50 services). It is not tainted:
+# the control plane's subcharts (Postgres, Keycloak, NATS) don't take a global toleration.
 kubectl label node runai  app=runai-control-plane --overwrite
-# The Run:ai control plane gets its own node; nothing else lands there unless it tolerates this.
-kubectl taint node runai dedicated=runai-control-plane:NoSchedule --overwrite
 
 # kubelet's default image GC deletes the largest UNUSED images once the disk passes 85%. The BNK install
 # pulls enough to cross that, and the first victim is the baked 15GB genai-perf client (nothing runs it
