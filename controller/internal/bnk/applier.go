@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -60,11 +61,24 @@ func (a *Applier) Apply(ctx context.Context, d reconcile.Desired) error {
 }
 
 // copyPullSecret puts BNK's registry credential into the tenant namespace. BNK runs each tenant's
-// Endpoint Picker there from repo.f5.com, and the credential ships only in the BNK namespace.
-// Run:ai creates the namespace with the project, so this happens per tenant. Skipped when unset.
+// Endpoint Picker there from repo.f5.com, and the credential ships only in the BNK namespace (the
+// bnk-ai-kv-lab does the same copy by hand). Anyone allowed to read Secrets in a tenant namespace can
+// read it, so it is only ever written into namespaces Run:ai created for a project, never over a
+// Secret someone else owns. Skipped when PullSecret is unset.
 func (a *Applier) copyPullSecret(ctx context.Context, ns string) error {
 	if a.Config.PullSecret == "" {
 		return nil
+	}
+	if !tenantNamespace.MatchString(ns) || ns == a.Config.Namespace {
+		return fmt.Errorf("refusing to copy the BNK registry secret into namespace %q: not a Run:ai project namespace", ns)
+	}
+	cur := &corev1.Secret{}
+	err := a.Client.Get(ctx, client.ObjectKey{Namespace: ns, Name: a.Config.PullSecret}, cur)
+	if err == nil && cur.Labels[LabelManagedBy] != ManagedBy {
+		return fmt.Errorf("secret %s/%s exists and is not managed by %s; refusing to overwrite it", ns, a.Config.PullSecret, ManagedBy)
+	}
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("get secret %s/%s: %w", ns, a.Config.PullSecret, err)
 	}
 	src := &corev1.Secret{}
 	if err := a.Client.Get(ctx, client.ObjectKey{Namespace: a.Config.Namespace, Name: a.Config.PullSecret}, src); err != nil {
@@ -76,8 +90,11 @@ func (a *Applier) copyPullSecret(ctx context.Context, ns string) error {
 		Type:       src.Type,
 		Data:       src.Data,
 	}
-	return a.Client.Patch(ctx, dst, client.Apply, client.FieldOwner(FieldManager), client.ForceOwnership)
+	return a.Client.Patch(ctx, dst, client.Apply, client.FieldOwner(FieldManager))
 }
+
+// tenantNamespace is the shape of namespaces Run:ai creates for projects (prefix runai-).
+var tenantNamespace = regexp.MustCompile(`^runai-[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // mustOwn refuses objects that exist but were not created by this controller for this project,
 // so a name collision in the shared f5-bnk namespace can never hand one tenant another's config.

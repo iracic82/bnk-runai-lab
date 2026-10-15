@@ -320,6 +320,18 @@ func TestApplyCopiesPullSecretIntoTenantNamespace(t *testing.T) {
 	if got.Type != corev1.SecretTypeDockerConfigJson || string(got.Data[".dockerconfigjson"]) != "{}" {
 		t.Errorf("copied secret = %+v", got)
 	}
+	for _, bad := range []string{"f5-bnk", "kube-system", "default", "runai"} {
+		if err := a.copyPullSecret(ctx, bad); err == nil {
+			t.Errorf("must refuse to write the registry secret into %q", bad)
+		}
+	}
+	foreign := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "runai-tenant-b", Name: "far-pull-secret"}}
+	if err := a.Client.Create(ctx, foreign); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.copyPullSecret(ctx, "runai-tenant-b"); err == nil {
+		t.Error("must not overwrite a secret it does not manage")
+	}
 	a.Config.PullSecret = ""
 	if err := a.copyPullSecret(ctx, "runai-other"); err != nil {
 		t.Errorf("empty PullSecret must be a no-op, got %v", err)
