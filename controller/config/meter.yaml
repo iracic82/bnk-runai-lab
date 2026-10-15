@@ -1,0 +1,170 @@
+# Token meter: collects the usage lines the tenant iRules record at the BNK front door, exports them on
+# :9100/metrics and keeps per-project token totals (rolled up per Department) in the bnk-runai-usage ledger.
+#
+# Data path: every --flush-interval the meter sends GET /bnk/flush (X-BNK-Flush: <token>) to each tenant
+# Gateway VIP; the iRule answers 204 and sends its parked lines over TCP from TMM to --metering-sink, the
+# control node's IP on :5514 (hostNetwork below). TMM connects from its own network (self-IP 10.1.10.201 on
+# the internal VLAN), so a ClusterIP is not reachable from the iRule.
+#
+# LAB: confirm in the sandbox that 10.1.10.201 reaches <control-node-ip>:5514 and that the control node
+# reaches the tenant VIPs (172.16.201.110-149) on :8000, then set the controller's
+# --metering-sink=<control-node 10.1.10.x IP>:5514 and the meter's --allowed-peers to the TMM self-IP(s).
+#
+# The metering token is shared by the controller (rendered into each iRule) and the meter (checks the
+# iRule's "auth" line, authenticates /bnk/flush). Create it once:
+#   kubectl -n bnk-runai-tenancy create secret generic bnk-metering-token \
+#     --from-literal=token="$(head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c 32)"
+# The token is visible to anyone who can read F5BigCneIrule objects in f5-bnk: it raises the bar against
+# forging usage from the network, but RBAC on f5-bnk is the real boundary.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bnk-runai-meter
+  namespace: bnk-runai-tenancy
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bnk-runai-meter
+rules:
+  # Read-only on Run:ai: Run:ai's webhook lets only Run:ai's own services write projects/departments.
+  # Totals go to the bnk-runai-usage ledger; TokensMetered Events are attached to the Run:ai objects.
+  - apiGroups: ["kai.resources"]
+    resources: ["projects", "departments"]
+    verbs: ["get", "list"]
+  - apiGroups: ["", "events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bnk-runai-meter
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bnk-runai-meter
+subjects:
+  - kind: ServiceAccount
+    name: bnk-runai-meter
+    namespace: bnk-runai-tenancy
+---
+# Token ledger: one ConfigMap in the meter's own namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bnk-runai-meter-ledger
+  namespace: bnk-runai-tenancy
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["bnk-runai-usage"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bnk-runai-meter-ledger
+  namespace: bnk-runai-tenancy
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bnk-runai-meter-ledger
+subjects:
+  - kind: ServiceAccount
+    name: bnk-runai-meter
+    namespace: bnk-runai-tenancy
+---
+# Flush: find the tenant Gateway VIPs. Read-only, BNK namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bnk-runai-meter-gateways
+  namespace: f5-bnk
+rules:
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bnk-runai-meter-gateways
+  namespace: f5-bnk
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bnk-runai-meter-gateways
+subjects:
+  - kind: ServiceAccount
+    name: bnk-runai-meter
+    namespace: bnk-runai-tenancy
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bnk-runai-meter
+  namespace: bnk-runai-tenancy
+  labels: {app.kubernetes.io/name: bnk-runai-meter}
+spec:
+  replicas: 1
+  # One listener per host port; Recreate frees :5514 before the new pod binds it.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: bnk-runai-meter}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: bnk-runai-meter}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+    spec:
+      serviceAccountName: bnk-runai-meter
+      # TMM sends usage to the control node's own IP, so the meter listens on the host network there.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector: {node-role.kubernetes.io/control-plane: ""}
+      tolerations:
+        - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+        - {key: node-role.kubernetes.io/master, operator: Exists, effect: NoSchedule}
+      securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: meter
+          image: docker.io/iracic82/bnk-runai-meter:0.1.0
+          args:
+            - --listen=:5514
+            - --metrics-bind-address=:9100
+            # LAB: TMM self-IP(s) on the internal VLAN; confirm in the sandbox (and add the TMM pod CIDR if
+            # TMM's sideband connections are sourced from it).
+            - --allowed-peers=10.1.10.201
+            - --metering-token-file=/var/run/bnk-metering/token
+            - --bnk-namespace=f5-bnk
+            - --flush-interval=5s
+            - --writeback-interval=30s
+          ports:
+            - {name: usage, containerPort: 5514, hostPort: 5514, protocol: TCP}
+            - {name: metrics, containerPort: 9100, hostPort: 9100, protocol: TCP}
+          livenessProbe: {httpGet: {path: /healthz, port: 9100}}
+          readinessProbe: {httpGet: {path: /healthz, port: 9100}}
+          volumeMounts:
+            - {name: token, mountPath: /var/run/bnk-metering, readOnly: true}
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, readOnlyRootFilesystem: true}
+      volumes:
+        - name: token
+          secret: {secretName: bnk-metering-token, items: [{key: token, path: token}]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bnk-runai-meter-metrics
+  namespace: bnk-runai-tenancy
+  labels: {app.kubernetes.io/name: bnk-runai-meter}
+spec:
+  selector: {app.kubernetes.io/name: bnk-runai-meter}
+  ports: [{name: metrics, port: 9100, targetPort: 9100}]

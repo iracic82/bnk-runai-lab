@@ -15,10 +15,10 @@ kind: ClusterRole
 metadata:
   name: bnk-runai-tenancy
 rules:
-  # Run:ai side: read projects/departments, own the finalizer.
+  # Run:ai side: read only. Run:ai's webhook lets only Run:ai's own services write projects.
   - apiGroups: ["kai.resources"]
     resources: ["projects", "departments"]
-    verbs: ["get", "list", "watch", "update", "patch"]
+    verbs: ["get", "list", "watch"]
   # BNK side: the tenant objects it renders (Gateway API, GAIE, F5 EPP, iRule, NetPolicy).
   - apiGroups: ["gateway.networking.k8s.io", "inference.networking.k8s.io", "inference.k8s.f5.com", "k8s.f5net.com", "gateway.k8s.f5.com"]
     resources: ["gateways", "httproutes", "inferencepools", "f5epps", "f5bigcneirules", "netpolicies"]
@@ -96,6 +96,11 @@ spec:
         - name: manager
           image: docker.io/iracic82/bnk-runai-tenancy:0.1.0
           args: ["--leader-elect", "--bnk-namespace=f5-bnk", "--vip-range=172.16.201.110-172.16.201.149"]
+          # Token metering (config/meter.yaml): add
+          #   --metering-sink=<control-node 10.1.10.x IP>:5514
+          #   --metering-token-file=/var/run/bnk-metering/token
+          # and mount the bnk-metering-token Secret at /var/run/bnk-metering (see meter.yaml). The sink must
+          # be reachable from the TMM self-IP (10.1.10.201): confirm in the sandbox. Empty sink = metering off.
           ports:
             - {name: metrics, containerPort: 8080}
             - {name: probes, containerPort: 8081}

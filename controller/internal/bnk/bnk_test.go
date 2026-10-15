@@ -25,7 +25,10 @@ func desired(project, ns string, rps float64) reconcile.Desired {
 }
 
 func TestRenderPlacesObjects(t *testing.T) {
-	objs := Render(DefaultConfig(), desired("tenant-a", "runai-tenant-a", 40), "172.16.201.110")
+	objs, err := Render(DefaultConfig(), desired("tenant-a", "runai-tenant-a", 40), "172.16.201.110")
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := map[string]string{ // kind -> namespace
 		"Gateway": "f5-bnk", "F5EPP": "runai-tenant-a", "InferencePool": "runai-tenant-a",
 		"HTTPRoute": "runai-tenant-a", "F5BigCneIrule": "f5-bnk", "NetPolicy": "f5-bnk",
@@ -55,18 +58,142 @@ func TestRenderPlacesObjects(t *testing.T) {
 	}
 }
 
+func mustRender(t *testing.T, cfg Config, d reconcile.Desired, vip string) []*unstructured.Unstructured {
+	t.Helper()
+	objs, err := Render(cfg, d, vip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return objs
+}
+
+func mustIRule(t *testing.T, project, dept string, rps float64, sink, token string) string {
+	t.Helper()
+	r, err := TenantIRule(project, dept, rps, sink, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+const testToken = "flush-token-0123456789abcdef"
+
 func TestLimitIRule(t *testing.T) {
-	r := LimitIRule("tenant-b", 10)
+	r := mustIRule(t, "tenant-b", "acme", 10, "", "")
 	for _, want := range []string{`if { $rl_n > 10 }`, `HTTP::respond 429`, `"X-BNK-Tenant" "tenant-b"`, `"rl_tenant_b"`, `scan $rl_d %d rl_n`} {
 		if !strings.Contains(r, want) {
 			t.Errorf("iRule missing %q:\n%s", want, r)
 		}
 	}
-	if !strings.Contains(LimitIRule("x", 0.2), "$rl_n > 1 }") {
+	for _, absent := range []string{"connect", "HTTP::collect", "/bnk/", "%!", "@"} {
+		if strings.Contains(r, absent) {
+			t.Errorf("metering off must not render %q:\n%s", absent, r)
+		}
+	}
+	if !strings.Contains(mustIRule(t, "x", "", 0.2, "", ""), "$rl_n > 1 }") {
 		t.Error("limit must never drop below 1 req/s")
 	}
-	if !strings.Contains(LimitIRule("x", 12.5), "$rl_n > 13 }") {
+	if !strings.Contains(mustIRule(t, "x", "", 12.5, "", ""), "$rl_n > 13 }") {
 		t.Error("fractional limits round up")
+	}
+}
+
+func TestMeteredIRule(t *testing.T) {
+	r := mustIRule(t, "tenant-b", "acme", 10, "10.1.10.10:5514", testToken)
+	for _, want := range []string{
+		// rate limiting unchanged
+		`if { $rl_n > 10 }`, `HTTP::respond 429`, `"X-BNK-Tenant" "tenant-b"`,
+		// the flush path is token-gated and sends to the sink from a request event only
+		`[HTTP::header value "X-BNK-Flush"] eq "` + testToken + `"`,
+		`[HTTP::path] ne "/bnk/flush"`,
+		`connect -protocol TCP "10.1.10.10:5514"`, "send -timeout 2000 $tm_c \"auth " + testToken + "\\n$tm_lines\"",
+		`log local0. "BNK usage flush failed: $tm_err"`,
+		// records are parked under the tenant's own subtable, values read via regexp + scan
+		`"tm_tenant_b"`, `scan $tm_d %d tm_seq`,
+		// the line format the meter parses
+		`"project=tenant-b dept=acme model=$tm_m prompt=$tm_p completion=$tm_cp total=$tm_t code=$tm_status"`,
+		`code=429 n=$tm_k`,
+		// non-stream and SSE
+		`HTTP::collect $tm_collect`, `\[DONE\]`, `string last {"total_tokens"}`, `HTTP::collect 1`,
+		// never break the response
+		`log local0. "BNK metering failed: $tm_err"`, `when CLIENT_CLOSED`,
+	} {
+		if !strings.Contains(r, want) {
+			t.Errorf("metered iRule missing %q", want)
+		}
+	}
+	for _, bad := range []string{"%!", "@"} {
+		if strings.Contains(r, bad) {
+			t.Errorf("unrendered placeholder %q in:\n%s", bad, r)
+		}
+	}
+	// A sideband connect in a response event wedged TMM on BNK 2.4: connect only in HTTP_REQUEST.
+	if i := strings.Index(r, "when HTTP_RESPONSE"); strings.Contains(r[i:], "connect ") {
+		t.Error("connect must only appear in HTTP_REQUEST")
+	}
+	plain := strings.NewReplacer(`\{`, "", `\}`, "").Replace(r)
+	if strings.Count(plain, "{") != strings.Count(plain, "}") {
+		t.Error("unbalanced braces")
+	}
+}
+
+func TestIRuleRefusesTclInjection(t *testing.T) {
+	for _, tc := range []struct{ project, dept string }{
+		{`a"; HTTP::respond 200 content x; #`, "acme"},
+		{"tenant-a", `acme[exec rm]`},
+		{"tenant-a", "$dept"},
+		{"Tenant-A", "acme"},
+		{"", "acme"},
+		{"-lead", "acme"},
+		{"tenant a", "acme"},
+		{"tenant-a", "ac}me"},
+	} {
+		if _, err := TenantIRule(tc.project, tc.dept, 10, "10.1.10.10:5514", testToken); err == nil {
+			t.Errorf("project=%q dept=%q must be refused", tc.project, tc.dept)
+		}
+	}
+	if _, err := TenantIRule("tenant-a", "", 10, "", ""); err != nil {
+		t.Errorf("a project without a department is fine: %v", err)
+	}
+	for _, sink := range []string{"meter.svc:5514", "10.1.10.10", `10.1.10.10:5514"]`} {
+		if _, err := TenantIRule("tenant-a", "acme", 10, sink, testToken); err == nil {
+			t.Errorf("sink %q must be refused", sink)
+		}
+	}
+	for _, tok := range []string{"", "short", `token-with-"quote"-0123456789`} {
+		if _, err := TenantIRule("tenant-a", "acme", 10, "10.1.10.10:5514", tok); err == nil {
+			t.Errorf("token %q must be refused", tok)
+		}
+	}
+	d := desired("tenant-a", "runai-tenant-a", 40)
+	d.Tenant.Department = "Bad Dept"
+	if _, err := Render(DefaultConfig(), d, "172.16.201.110"); err == nil {
+		t.Error("Render must refuse names that are not DNS labels")
+	}
+}
+
+func TestMeteringAddsFlushRoute(t *testing.T) {
+	paths := func(cfg Config) []string {
+		var out []string
+		for _, o := range mustRender(t, cfg, desired("tenant-a", "runai-tenant-a", 40), "172.16.201.110") {
+			if o.GetKind() != "HTTPRoute" {
+				continue
+			}
+			rules, _, _ := unstructured.NestedSlice(o.Object, "spec", "rules")
+			for _, m := range rules[0].(map[string]any)["matches"].([]any) {
+				v, _, _ := unstructured.NestedString(m.(map[string]any), "path", "value")
+				out = append(out, v)
+			}
+		}
+		return out
+	}
+	if got := paths(DefaultConfig()); len(got) != 1 || got[0] != "/v1" {
+		t.Errorf("metering off: matches = %v", got)
+	}
+	cfg := DefaultConfig()
+	cfg.MeteringSink, cfg.MeteringToken = "10.1.10.10:5514", testToken
+	if got := paths(cfg); len(got) != 2 || got[1] != "/bnk" {
+		t.Errorf("metering on: matches = %v", got)
 	}
 }
 
@@ -127,7 +254,7 @@ func TestLostVIPMapDoesNotReuseLiveAddress(t *testing.T) {
 	a := newApplier(t, 2)
 	ctx := context.Background()
 	ipA, _ := a.vipFor(ctx, "tenant-a")
-	gw := Render(a.Config, desired("tenant-a", "runai-tenant-a", 40), ipA.String())[0]
+	gw := mustRender(t, a.Config, desired("tenant-a", "runai-tenant-a", 40), ipA.String())[0]
 	if err := a.Client.Create(ctx, gw); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +283,7 @@ func TestApplyRefusesForeignObjects(t *testing.T) {
 	if err := a.Client.Create(ctx, foreign); err != nil {
 		t.Fatal(err)
 	}
-	gw := Render(a.Config, desired("tenant-a", "runai-tenant-a", 40), "172.16.201.110")[0]
+	gw := mustRender(t, a.Config, desired("tenant-a", "runai-tenant-a", 40), "172.16.201.110")[0]
 	if err := a.mustOwn(ctx, gw, "tenant-a"); err == nil {
 		t.Fatal("must refuse to take over an object it does not manage")
 	}

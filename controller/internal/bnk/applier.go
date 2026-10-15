@@ -40,7 +40,11 @@ func (a *Applier) Apply(ctx context.Context, d reconcile.Desired) error {
 	if err != nil {
 		return err
 	}
-	for _, o := range Render(a.Config, d, vip.String()) {
+	objs, err := Render(a.Config, d, vip.String())
+	if err != nil {
+		return err
+	}
+	for _, o := range objs {
 		if err := a.mustOwn(ctx, o, d.Tenant.Project); err != nil {
 			return err
 		}
@@ -93,6 +97,31 @@ func (a *Applier) Delete(ctx context.Context, project string) error {
 		}
 	}
 	return a.releaseVIP(ctx, project)
+}
+
+// Projects returns every Run:ai project that has a managed tenant Gateway, so the reconciler can
+// find tenants whose project was deleted while the controller was down.
+func (a *Applier) Projects(ctx context.Context) ([]string, error) {
+	seen := map[string]bool{}
+	var out []string
+	for _, gvk := range OwnedKinds {
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
+		err := a.Client.List(ctx, list, client.MatchingLabels{LabelManagedBy: ManagedBy})
+		if meta.IsNoMatchError(err) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("list %s: %w", gvk.Kind, err)
+		}
+		for _, o := range list.Items {
+			if p := o.GetLabels()[LabelProject]; p != "" && !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	return out, nil
 }
 
 // VIP bookkeeping lives in one ConfigMap in the BNK namespace, updated with optimistic concurrency:

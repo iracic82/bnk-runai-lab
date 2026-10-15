@@ -1,17 +1,19 @@
 ENVTEST_K8S ?= 1.30.x
 IMG ?= docker.io/iracic82/bnk-runai-tenancy:0.1.0
+IMG_METER ?= docker.io/iracic82/bnk-runai-meter:0.1.0
 GOBIN := $(shell go env GOPATH)/bin
 
-.PHONY: build test envtest vet image push
+.PHONY: build test envtest vet image push meter-image meter-push
 
 build:
 	go build -o bin/manager ./cmd/manager
+	go build -o bin/meter ./cmd/meter
 
 vet:
 	go vet ./...
 
 test: vet
-	go test ./internal/...
+	go test ./internal/... ./cmd/...
 
 # Real kube-apiserver at the BNK 2.4 cluster version, with the Run:ai kai.resources CRDs.
 envtest:
@@ -23,3 +25,9 @@ image:
 
 push: image
 	docker push $(IMG)
+
+meter-image:
+	docker build --platform linux/amd64 -f Dockerfile.meter -t $(IMG_METER) .
+
+meter-push: meter-image
+	docker push $(IMG_METER)

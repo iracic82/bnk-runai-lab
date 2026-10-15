@@ -12,16 +12,17 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/f5devcentral/bnk-runai-tenancy/internal/tenant"
 )
 
-// Finalizer holds a Run:ai project until its BNK tenant is gone. A finalizer is used instead
-// of ownerReferences because the project is cluster-scoped and the BNK objects are namespaced.
-const Finalizer = "tenancy.f5.com/bundle"
+// The controller never writes to Run:ai objects: Run:ai's admission webhook lets only Run:ai's own
+// service accounts change projects and departments (runai-cluster/cluster/agent/pkg/validator/
+// project_validator.go). So there is no finalizer. A deleted project is noticed by its absence,
+// and its BNK objects are removed by label; Sweep does the same for anything orphaned while the
+// controller was down.
 
 // Desired is what the BNK side must look like for one Run:ai project.
 type Desired struct {
@@ -36,6 +37,8 @@ type Desired struct {
 type BundleApplier interface {
 	Apply(ctx context.Context, d Desired) error
 	Delete(ctx context.Context, project string) error
+	// Projects lists the Run:ai projects that currently have BNK objects.
+	Projects(ctx context.Context) ([]string, error)
 }
 
 // ProjectReconciler keeps one BNK tenant per Run:ai project.
@@ -66,39 +69,21 @@ const (
 )
 
 // +kubebuilder:rbac:groups=kai.resources,resources=projects;departments,verbs=get;list;watch
-// +kubebuilder:rbac:groups=kai.resources,resources=projects,verbs=update;patch
 // +kubebuilder:rbac:groups=scheduling.run.ai,resources=queues,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithValues("project", req.Name)
-
 	var p kaiv1alpha1.Project
 	if err := r.Get(ctx, req.NamespacedName, &p); err != nil {
 		if apierrors.IsNotFound(err) {
-			r.setState(req.Name, "")
-			return ctrl.Result{}, nil
+			return ctrl.Result{}, r.remove(ctx, req.Name)
 		}
 		return ctrl.Result{}, err
 	}
 
-	// Project being deleted in Run:ai: remove the BNK tenant first, then release the project.
+	// Being deleted in Run:ai: take the BNK tenant down now rather than when the object is gone.
 	if !p.DeletionTimestamp.IsZero() {
-		if !controllerutil.ContainsFinalizer(&p, Finalizer) {
-			return ctrl.Result{}, nil
-		}
-		r.setState(p.Name, StateDraining)
-		if err := r.Applier.Delete(ctx, p.Name); err != nil {
-			r.event(&p, corev1.EventTypeWarning, "BNKDeleteFailed", err.Error())
-			return ctrl.Result{}, err
-		}
-		controllerutil.RemoveFinalizer(&p, Finalizer)
-		if err := r.Update(ctx, &p); err != nil {
-			return ctrl.Result{}, err
-		}
-		r.setState(p.Name, "")
-		logger.Info("BNK tenant removed")
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, r.remove(ctx, p.Name)
 	}
 
 	if !tenant.Ready(&p) {
@@ -129,7 +114,6 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if ns == spec.Namespace {
 			// Fail closed: a tenant that was already serving must lose its BNK config, or
 			// pods of the other project in the same namespace would receive its traffic.
-			// The finalizer stays, so a later delete still goes through the BNK cleanup.
 			if err := r.Applier.Delete(ctx, p.Name); err != nil {
 				r.event(&p, corev1.EventTypeWarning, "BNKDeleteFailed", err.Error())
 				return ctrl.Result{}, err
@@ -138,13 +122,6 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			r.setState(p.Name, StateError)
 			r.event(&p, corev1.EventTypeWarning, "NamespaceConflict", msg)
 			return ctrl.Result{}, nil
-		}
-	}
-
-	if !controllerutil.ContainsFinalizer(&p, Finalizer) {
-		controllerutil.AddFinalizer(&p, Finalizer)
-		if err := r.Update(ctx, &p); err != nil {
-			return ctrl.Result{}, err
 		}
 	}
 
@@ -160,16 +137,43 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, nil
 }
 
-// release removes the BNK tenant and the finalizer, for projects opted out with tenancy.f5.com/skip.
+// release removes the BNK tenant of a project opted out with tenancy.f5.com/skip.
 func (r *ProjectReconciler) release(ctx context.Context, p *kaiv1alpha1.Project) error {
-	if !controllerutil.ContainsFinalizer(p, Finalizer) {
-		return nil
-	}
-	if err := r.Applier.Delete(ctx, p.Name); err != nil {
+	return r.Applier.Delete(ctx, p.Name)
+}
+
+// remove takes a project's BNK tenant down. Delete is a no-op when nothing exists.
+func (r *ProjectReconciler) remove(ctx context.Context, project string) error {
+	r.setState(project, StateDraining)
+	if err := r.Applier.Delete(ctx, project); err != nil {
 		return err
 	}
-	controllerutil.RemoveFinalizer(p, Finalizer)
-	return r.Update(ctx, p)
+	r.setState(project, "")
+	log.FromContext(ctx).Info("BNK tenant removed", "project", project)
+	return nil
+}
+
+// Sweep removes BNK tenants whose Run:ai project no longer exists. It runs once at start-up,
+// covering deletes that happened while the controller was down; after that, watch events do it.
+func (r *ProjectReconciler) Sweep(ctx context.Context) error {
+	owned, err := r.Applier.Projects(ctx)
+	if err != nil {
+		return err
+	}
+	for _, name := range owned {
+		var p kaiv1alpha1.Project
+		err := r.Get(ctx, client.ObjectKey{Name: name}, &p)
+		if apierrors.IsNotFound(err) {
+			if err := r.remove(ctx, name); err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *ProjectReconciler) requeue() time.Duration {

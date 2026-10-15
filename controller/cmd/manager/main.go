@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"os"
+	"strings"
 
 	kaiv1alpha1 "github.com/kai-scheduler/kai-resource-management-api/kai/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
@@ -16,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -33,6 +35,8 @@ func (dryRunApplier) Apply(ctx context.Context, d reconcile.Desired) error {
 		"rps", d.RateLimit, "criticality", d.Criticality)
 	return nil
 }
+
+func (dryRunApplier) Projects(context.Context) ([]string, error) { return nil, nil }
 
 func (dryRunApplier) Delete(ctx context.Context, project string) error {
 	ctrl.LoggerFrom(ctx).Info("dry-run: would delete BNK tenant", "project", project)
@@ -55,6 +59,7 @@ func main() {
 		leaderElect, dryRun    bool
 		bnkCfg                 = bnk.DefaultConfig()
 		vipRange               string
+		meteringTokenFile      string
 		policy                 = reconcile.DefaultPolicy()
 	)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "metrics endpoint")
@@ -64,6 +69,8 @@ func main() {
 	flag.StringVar(&bnkCfg.Namespace, "bnk-namespace", bnkCfg.Namespace, "namespace of BNK gateways and iRules")
 	flag.StringVar(&bnkCfg.GatewayClass, "gateway-class", bnkCfg.GatewayClass, "GatewayClass served by BNK")
 	flag.StringVar(&bnkCfg.Tokenizer, "tokenizer", bnkCfg.Tokenizer, "tokenizer for the Endpoint Picker's prefix-cache scorer")
+	flag.StringVar(&bnkCfg.MeteringSink, "metering-sink", "", "IP:port TMM sends usage lines to (the meter on the control node); empty = metering off")
+	flag.StringVar(&meteringTokenFile, "metering-token-file", "", "file holding the shared metering token (required with --metering-sink)")
 	flag.StringVar(&vipRange, "vip-range", "172.16.201.110-172.16.201.149", "addresses tenant gateways are served from")
 	flag.Float64Var(&policy.BaseRPS, "base-rps", policy.BaseRPS, "requests/s per deserved GPU")
 	flag.Float64Var(&policy.MinGPUFactor, "min-gpu-factor", policy.MinGPUFactor, "GPU floor for projects without a GPU quota")
@@ -75,6 +82,22 @@ func main() {
 	policy.CriticalPriorityThreshold = int32(threshold)
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	log := ctrl.Log.WithName("setup")
+	if bnkCfg.MeteringSink != "" {
+		if meteringTokenFile == "" {
+			log.Error(nil, "--metering-sink needs --metering-token-file")
+			os.Exit(1)
+		}
+		b, err := os.ReadFile(meteringTokenFile)
+		if err != nil {
+			log.Error(err, "metering-token-file")
+			os.Exit(1)
+		}
+		bnkCfg.MeteringToken = strings.TrimSpace(string(b))
+	}
+	if err := bnk.ValidateMetering(bnkCfg.MeteringSink, bnkCfg.MeteringToken); err != nil {
+		log.Error(err, "metering")
+		os.Exit(1)
+	}
 
 	scheme := runtime.NewScheme()
 	for _, add := range []func(*runtime.Scheme) error{clientgoscheme.AddToScheme, kaiv1alpha1.AddToScheme} {
@@ -114,20 +137,34 @@ func main() {
 	if dryRun {
 		applier = dryRunApplier{}
 	}
-	if err := (&reconcile.ProjectReconciler{
+	rec := &reconcile.ProjectReconciler{
 		Client:   mgr.GetClient(),
 		Applier:  applier,
 		Policy:   policy,
 		Recorder: mgr.GetEventRecorderFor("bnk-runai-tenancy"),
 		State:    tenantState{state},
-	}).SetupWithManager(mgr); err != nil {
+	}
+	if err := rec.SetupWithManager(mgr); err != nil {
 		log.Error(err, "controller")
+		os.Exit(1)
+	}
+	// Once the cache is up and this replica leads: drop tenants whose project vanished while down.
+	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		if !mgr.GetCache().WaitForCacheSync(ctx) {
+			return nil
+		}
+		if err := rec.Sweep(ctx); err != nil {
+			log.Error(err, "start-up sweep of orphaned BNK tenants")
+		}
+		return nil
+	})); err != nil {
+		log.Error(err, "sweep")
 		os.Exit(1)
 	}
 	_ = mgr.AddHealthzCheck("healthz", healthz.Ping)
 	_ = mgr.AddReadyzCheck("readyz", healthz.Ping)
 
-	log.Info("starting", "dryRun", dryRun, "policy", policy)
+	log.Info("starting", "dryRun", dryRun, "policy", policy, "meteringSink", bnkCfg.MeteringSink)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		log.Error(err, "manager exited")
 		os.Exit(1)

@@ -17,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -41,6 +40,16 @@ func (a *applier) Delete(_ context.Context, p string) error {
 	defer a.mu.Unlock()
 	delete(a.applied, p)
 	return nil
+}
+
+func (a *applier) Projects(_ context.Context) ([]string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var out []string
+	for p := range a.applied {
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 func (a *applier) get(p string) (reconcile.Desired, bool) {
@@ -127,13 +136,16 @@ func TestProjectLifecycle(t *testing.T) {
 		return ok && d.Tenant.Namespace == "runai-tenant-a" && d.RateLimit == 40
 	})
 
+	// The controller never writes to the Run:ai project (Run:ai's webhook would refuse it).
 	var got kaiv1alpha1.Project
-	eventually(t, "finalizer on the Run:ai project", func() bool {
-		return c.Get(ctx, types.NamespacedName{Name: "tenant-a"}, &got) == nil &&
-			controllerutil.ContainsFinalizer(&got, reconcile.Finalizer)
-	})
+	if err := c.Get(ctx, types.NamespacedName{Name: "tenant-a"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Finalizers) != 0 {
+		t.Fatalf("controller added finalizers %v to the Run:ai project", got.Finalizers)
+	}
 
-	// Delete in Run:ai: the BNK tenant goes, then the project is released.
+	// Delete in Run:ai: the BNK tenant goes with it.
 	if err := c.Delete(ctx, &got); err != nil {
 		t.Fatal(err)
 	}

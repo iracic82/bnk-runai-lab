@@ -17,13 +17,11 @@ func project(name, ns string) kaiv1alpha1.Project {
 
 func TestNamespaceConflicts(t *testing.T) {
 	now := metav1.Now()
-	// Deleted and already cleaned up: no longer a claimant.
+	// Being deleted: its BNK config is removed on that event, so it no longer claims the namespace.
 	released := project("old", "runai-shared")
 	released.DeletionTimestamp = &now
-	// Deleted but BNK cleanup not finished: still a claimant.
-	draining := project("draining", "runai-other")
-	draining.DeletionTimestamp = &now
-	draining.Finalizers = []string{Finalizer}
+	leaving := project("leaving", "runai-other")
+	leaving.DeletionTimestamp = &now
 
 	got := NamespaceConflicts([]kaiv1alpha1.Project{
 		project("tenant-a", "runai-tenant-a"),
@@ -31,10 +29,10 @@ func TestNamespaceConflicts(t *testing.T) {
 		project("y", "runai-shared"),
 		project("pending", ""),
 		released,
-		draining,
+		leaving,
 		project("newcomer", "runai-other"),
 	})
-	want := map[string][]string{"runai-shared": {"x", "y"}, "runai-other": {"draining", "newcomer"}}
+	want := map[string][]string{"runai-shared": {"x", "y"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("NamespaceConflicts = %v, want %v", got, want)
 	}

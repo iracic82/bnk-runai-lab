@@ -12,7 +12,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // recordingApplier stands in for the BNK side and records what it was asked to do.
@@ -29,6 +28,16 @@ func (a *recordingApplier) Apply(_ context.Context, d Desired) error {
 	defer a.mu.Unlock()
 	a.applied[d.Tenant.Project] = d
 	return nil
+}
+
+func (a *recordingApplier) Projects(_ context.Context) ([]string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var out []string
+	for p := range a.applied {
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 func (a *recordingApplier) Delete(_ context.Context, project string) error {
@@ -93,10 +102,11 @@ func TestProjectBecomesTenant(t *testing.T) {
 	if g["tenant-a"] != StateServing {
 		t.Errorf("state = %q", g["tenant-a"])
 	}
+	// Run:ai's webhook refuses writes to projects from anyone but Run:ai: the controller must not write.
 	var p kaiv1alpha1.Project
 	_ = r.Get(context.Background(), types.NamespacedName{Name: "tenant-a"}, &p)
-	if !controllerutil.ContainsFinalizer(&p, Finalizer) {
-		t.Error("finalizer not added")
+	if len(p.Finalizers) != 0 || p.ResourceVersion != "999" {
+		t.Errorf("controller wrote to the Run:ai project: finalizers=%v resourceVersion=%s", p.Finalizers, p.ResourceVersion)
 	}
 }
 
@@ -131,7 +141,6 @@ func TestNotReadyIsRequeued(t *testing.T) {
 
 func TestDeleteRemovesTenant(t *testing.T) {
 	p := readyProject("tenant-b", "runai-tenant-b", 0.5, 50)
-	p.Finalizers = []string{Finalizer}
 	r, a, g := setup(t, p)
 	reconcileOnce(t, r, "tenant-b")
 
@@ -142,12 +151,28 @@ func TestDeleteRemovesTenant(t *testing.T) {
 	if len(a.deleted) != 1 || a.deleted[0] != "tenant-b" {
 		t.Errorf("deleted = %v", a.deleted)
 	}
+	if _, ok := a.applied["tenant-b"]; ok {
+		t.Error("tenant-b must have no BNK tenant after its project is gone")
+	}
 	if _, ok := g["tenant-b"]; ok {
 		t.Error("state should be forgotten after delete")
 	}
-	var gone kaiv1alpha1.Project
-	if err := r.Get(context.Background(), types.NamespacedName{Name: "tenant-b"}, &gone); err == nil {
-		t.Error("project should be gone once the finalizer is released")
+}
+
+// A project deleted while the controller was down leaves BNK objects behind; Sweep removes them
+// and leaves live tenants alone.
+func TestSweepRemovesOrphans(t *testing.T) {
+	r, a, _ := setup(t, readyProject("tenant-a", "runai-tenant-a", 2, 150))
+	reconcileOnce(t, r, "tenant-a")
+	a.applied["ghost"] = Desired{}
+	if err := r.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := a.applied["ghost"]; ok {
+		t.Error("orphaned tenant 'ghost' should be removed")
+	}
+	if _, ok := a.applied["tenant-a"]; !ok {
+		t.Error("live tenant-a must survive the sweep")
 	}
 }
 
@@ -184,11 +209,6 @@ func TestConflictRemovesExistingTenant(t *testing.T) {
 	if g["tenant-a"] != StateError || g["intruder"] != StateError {
 		t.Errorf("states = %v", g)
 	}
-	var p kaiv1alpha1.Project
-	_ = r.Get(context.Background(), types.NamespacedName{Name: "tenant-a"}, &p)
-	if !controllerutil.ContainsFinalizer(&p, Finalizer) {
-		t.Error("finalizer must stay so a later delete still runs the BNK cleanup")
-	}
 }
 
 func TestBadAnnotationIsAnErrorNotACrash(t *testing.T) {
@@ -214,10 +234,6 @@ func TestSkipReleasesTenant(t *testing.T) {
 	reconcileOnce(t, r, "tenant-a")
 	if _, ok := a.applied["tenant-a"]; ok {
 		t.Error("skipped project must have no BNK tenant")
-	}
-	_ = r.Get(context.Background(), types.NamespacedName{Name: "tenant-a"}, &p)
-	if controllerutil.ContainsFinalizer(&p, Finalizer) {
-		t.Error("finalizer should be released for a skipped project")
 	}
 }
 
