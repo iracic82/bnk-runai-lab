@@ -231,4 +231,4 @@ T027, T028, T029, T030 (tests)  ‖  T031, T032 (models/derivations)
 |---|---|
 | Tasks tagged 🟢 pre-spike (some partially) | ~33 |
 | Tasks tagged 🔒 BNK-gated (some partially) | ~22 |
-| Total tasks | 76 |
+| Total tasks | 72 |
