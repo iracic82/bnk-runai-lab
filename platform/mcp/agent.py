@@ -162,8 +162,16 @@ def llm(messages, functions):
     return json.loads(text)["choices"][0]["message"]
 
 
+# Tools that only read. Anything else needs a human yes, except a manage_org_unit preview whose dryRun is
+# exactly the boolean true (a missing value or the string "false" counts as a write: fail closed).
+READ_ONLY_TOOLS = {"list_projects", "list_departments", "list_node_pools",
+                   "get_tenant_front_door", "get_tenant_usage", "list_tenants"}
+
+
 def is_write(name, args):
-    return name == "manage_org_unit" and not args.get("dryRun", True)
+    if name in READ_ONLY_TOOLS:
+        return False
+    return not (name == "manage_org_unit" and args.get("dryRun") is True)
 
 
 def approve(name, args):
