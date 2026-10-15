@@ -84,17 +84,28 @@
   td.k { color: var(--mild); white-space: nowrap; }
   td .m { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   @media (prefers-reduced-motion: reduce) { .hop.active { animation: none; } }
-  .vision { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 4px 0 18px; }
-  .vcard { min-width: 0; overflow-wrap: anywhere; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 6px;
-           border-top: 3px solid var(--vc); text-align: left; font: inherit; color: inherit; cursor: pointer; }
-  .vcard:hover { border-color: var(--line-strong); border-top-color: var(--vc); }
+  .vision { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 4px 0 20px; }
+  @media (max-width: 1000px) { .vision { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 560px) { .vision { grid-template-columns: 1fr; } .vcard .h { min-height: 0; } }
+  .vcard { min-width: 0; overflow-wrap: break-word; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+           padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; text-align: left; font: inherit; color: inherit; cursor: pointer;
+           box-shadow: inset 0 3px 0 var(--vc); transition: border-color .15s, transform .15s; }
+  .vcard:hover { border-color: var(--vc); transform: translateY(-1px); }
   .vcard:focus-visible { outline: 2px solid var(--ctrl); outline-offset: 2px; }
-  .vcard .k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
-  .vcard .k b { font-weight: 600; color: var(--vc); }
-  .vcard .h { font-size: 14px; font-weight: 600; line-height: 1.3; }
-  .vcard .p { font-size: 12.5px; color: var(--mild); line-height: 1.45; }
-  .vcard .proof { font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
-  .vcard.next { cursor: default; opacity: .78; border-top-style: dashed; }
+  .vcard .k { font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .vcard .k b { font-weight: 600; color: var(--vc); border: 1px solid currentColor; border-radius: 999px; padding: 1px 7px; font-size: 9.5px; white-space: nowrap; }
+  .vcard .h { font-size: 15px; font-weight: 600; line-height: 1.3; text-wrap: balance; min-height: 2.6em; }
+  .vcard .p { font-size: 12.5px; color: var(--mild); line-height: 1.5; }
+  .vcard .proof { margin-top: auto; display: flex; flex-direction: column; gap: 2px; font: 11.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text);
+                  background: var(--bg); border: 1px solid var(--line); border-left: 2px solid var(--vc); border-radius: 6px; padding: 7px 9px; }
+  .vcard .proof i { font-style: normal; font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { .vcard, .vcard:hover { transition: none; transform: none; } }
+  .vcard.next { cursor: default; box-shadow: none; border-style: dashed; }
+  .vcard.next:hover { transform: none; border-color: var(--line-strong); }
+  .vcard .todo { margin: 0; padding: 0; list-style: none; display: grid; gap: 5px; font-size: 12.5px; color: var(--mild); }
+  .vcard .todo li::before { content: "\25CB  "; color: var(--muted); }
+  .vcard .todo li.done { color: var(--text); }
+  .vcard .todo li.done::before { content: "\25CF  "; color: var(--ctrl); }
   h3.band { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 500; margin: 18px 0 8px; }
 
 </style>
@@ -110,37 +121,42 @@
     it travel, or click any box to see what it does.</p>
   <h3 class="band">The brief, shown live · click a card to play it</h3>
   <div class="vision" id="vision">
-    <button class="vcard" data-go="define" style="--vc:var(--ctrl)"><span class="k">W1 · Santosh <b>shown</b></span>
-      <span class="h">A tenant is defined once, in Run:ai, and exists in BNK</span>
-      <span class="p">Create a project in the Run:ai UI or API. Its BNK Gateway, route, picker and limit appear on their own.</span>
-      <span class="proof">project Ready → Gateway Programmed, ~30 s</span></button>
-    <button class="vcard" data-go="limit" style="--vc:var(--limit)"><span class="k">Isolation · Santosh <b>shown</b></span>
-      <span class="h">Each tenant keeps its share of the GPU estate</span>
-      <span class="p">The limit comes from the project's GPU quota. Excess is refused at BNK, before any GPU.</span>
-      <span class="proof">0.5 GPU → 10 req/s · 74% refused · neighbour 0%</span></button>
-    <button class="vcard" data-go="meter" style="--vc:var(--meter)"><span class="k">W2 · A · B · D <b>shown</b></span>
-      <span class="h">Tokens per project, department and GPU</span>
-      <span class="p">Metered at the BNK edge from each answer's usage, reported against the Run:ai project and rolled up per department.</span>
-      <span class="proof">tenant-a 12,470 tokens = ledger</span></button>
-    <button class="vcard" data-go="chat" style="--vc:var(--picker)"><span class="k">W4 · Workload map <b>shown</b></span>
+    <button class="vcard" data-go="define" style="--vc:var(--ctrl)"><span class="k">W1 · One definition <b>live</b></span>
+      <span class="h">A tenant is defined once, in Run:ai</span>
+      <span class="p">Create a project in the Run:ai UI or API. Its BNK Gateway, route, picker and limit follow on their own.</span>
+      <span class="proof"><i>proof</i>project Ready → Gateway Programmed in ~30 s</span></button>
+    <button class="vcard" data-go="limit" style="--vc:var(--limit)"><span class="k">Isolation <b>live</b></span>
+      <span class="h">Each tenant keeps its GPU share</span>
+      <span class="p">The rate limit comes from the project's GPU quota. Excess is refused at BNK, before it reaches a GPU.</span>
+      <span class="proof"><i>proof</i>0.5 GPU → 10 req/s · 74% refused, neighbour 0%</span></button>
+    <button class="vcard" data-go="meter" style="--vc:var(--meter)"><span class="k">W2 · Metering <b>live</b></span>
+      <span class="h">Tokens per project and department</span>
+      <span class="p">Counted at the BNK edge from each answer's usage, booked to the Run:ai project and rolled up per department.</span>
+      <span class="proof"><i>proof</i>department total = sum of its projects</span></button>
+    <button class="vcard" data-go="chat" style="--vc:var(--picker)"><span class="k">W4 · Workload map <b>live</b></span>
       <span class="h">One tenant, two planes</span>
-      <span class="p">Run:ai places each model on a GPU fraction; BNK's Endpoint Picker chooses the replica. Grafana shows both side by side.</span>
-      <span class="proof">runai-scheduler · gpu-fraction 0.5 · F5EPP</span></button>
-    <button class="vcard" data-go="dynamo" style="--vc:var(--dyn)"><span class="k">NVIDIA Dynamo <b>shown</b></span>
+      <span class="p">Run:ai places each model on a GPU fraction. BNK's Endpoint Picker chooses the replica. Grafana shows both.</span>
+      <span class="proof"><i>proof</i>runai-scheduler · gpu-fraction 0.5 · F5EPP</span></button>
+    <button class="vcard" data-go="dynamo" style="--vc:var(--dyn)"><span class="k">NVIDIA Dynamo <b>live</b></span>
       <span class="h">BNK picks the Dynamo worker</span>
-      <span class="p">Dynamo runs on Run:ai GPU fractions. BNK's Endpoint Picker reads Dynamo's KV-cache events and sends each prompt to the worker that holds it.</span>
-      <span class="proof">F5EPP engine dynamo · prefix A 6/6 one worker, prefix B 6/6 the other</span></button>
-    <button class="vcard" data-go="hijack" style="--vc:var(--bnk)"><span class="k">Tenant boundary <b>shown</b></span>
-      <span class="h">No tenant can publish behind another's door</span>
+      <span class="p">Dynamo runs on Run:ai GPU fractions. BNK reads Dynamo's KV-cache events and sends each prompt to the worker that holds it.</span>
+      <span class="proof"><i>proof</i>F5EPP engine dynamo · prefix A 6/6, prefix B 6/6</span></button>
+    <button class="vcard" data-go="hijack" style="--vc:var(--bnk)"><span class="k">Tenant boundary <b>live</b></span>
+      <span class="h">No route behind another tenant's door</span>
       <span class="p">Each Gateway admits routes only from its own Run:ai project namespace.</span>
-      <span class="proof">Accepted=False · NotAllowedByListeners</span></button>
-    <button class="vcard" data-go="delete" style="--vc:var(--glue)"><span class="k">Lifecycle <b>shown</b></span>
+      <span class="proof"><i>proof</i>Accepted=False · NotAllowedByListeners</span></button>
+    <button class="vcard" data-go="delete" style="--vc:var(--glue)"><span class="k">Lifecycle <b>live</b></span>
       <span class="h">Delete the project, BNK forgets it</span>
-      <span class="p">Every BNK object for the project is removed; its address is held before reuse.</span>
-      <span class="proof">controller is read-only on Run:ai</span></button>
-    <div class="vcard next" style="--vc:var(--muted)"><span class="k">W3 · W5 · E <b>next</b></span>
-      <span class="h">Helm chart, validation matrix, GTC recording, upstream</span>
-      <span class="p">Package the controller as a Helm chart, publish it under Apache 2.0, open the Run:ai docs PR and issue, record the 12-minute demo.</span></div>
+      <span class="p">Every BNK object for the project is removed. Its address is held back before reuse.</span>
+      <span class="proof"><i>proof</i>BNK objects gone · Run:ai never written</span></button>
+    <div class="vcard next" style="--vc:var(--muted)"><span class="k">W3 · W5 · E <b>progress</b></span>
+      <span class="h">Packaging and the GTC demo</span>
+      <ul class="todo">
+        <li class="done">Helm chart, installed by this lab</li>
+        <li class="done">Validated on BNK 2.4 + Run:ai</li>
+        <li>12-minute GTC recording</li>
+        <li>Apache 2.0 release, Run:ai docs PR</li>
+      </ul></div>
   </div>
   <div class="bar">
     <div class="seg" role="group" aria-label="Choose a flow">

@@ -93,6 +93,15 @@ step "Run:ai cluster chart (scheduler + resource management)"
 # (NVIDIA's local-dev cluster ships them; ours gets them here, Prometheus itself comes later).
 bash "${LAB_ROOT}/platform/observability/install.sh" --crds-only
 use_hub_registry deploy_runai_cluster
+# deploy_runai_cluster passes .local-dev/values-rc.yaml (an empty mapping upstream). The operator turns
+# on cluster-wide ResourceClaimTemplates by default, so shared-objects-controller watches
+# resource.k8s.io/v1, which only exists from Kubernetes 1.34. On this 1.30 cluster its cache never
+# syncs and it crash-loops (seen live). The lab has no DRA, so switch that one sync off.
+cat > "${RUNAI_SRC}/.local-dev/values-rc.yaml" <<'VALS'
+clusterConfig:
+  project-controller:
+    clusterWideResourceClaimTemplate: false
+VALS
 # A release left by a failed install carries its old image names; its uninstall hooks would run
 # with them and hang. Remove it without hooks so NVIDIA's function starts from a clean slate.
 if helm -n runai status runai-cluster >/dev/null 2>&1 && \
