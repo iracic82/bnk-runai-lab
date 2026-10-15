@@ -41,6 +41,14 @@ detect_os_arch
 # Point every image at Docker Hub instead of Kind's localhost:5001 registry.
 REGISTRY_PORT=""; LOCAL_IMAGE_REPO=""
 registry() { printf '%s' "$RUNAI_IMAGE_REGISTRY"; }
+# Redefine one of NVIDIA's deploy functions with every localhost registry reference pointed at
+# Docker Hub. The match is unquoted: the cluster chart writes it inside "key=localhost:...".
+# Fails loudly if any localhost reference survives, so a changed upstream never deploys a bad image.
+use_hub_registry() {
+  local body; body="$(declare -f "$1" | sed "s#localhost:\${REGISTRY_PORT}/\${LOCAL_IMAGE_REPO}#${RUNAI_IMAGE_REGISTRY}#g")"
+  if grep -q 'localhost:\${REGISTRY_PORT}' <<<"$body"; then echo "registry rewrite missed a reference in $1" >&2; exit 1; fi
+  eval "$body"
+}
 
 step "ingress-nginx on the runai node (the Run:ai UI and API sit behind it)"
 kubectl apply -f "https://raw.githubusercontent.com/kubernetes/ingress-nginx/${INGRESS_NGINX_VERSION}/deploy/static/provider/baremetal/deploy.yaml"
@@ -65,7 +73,7 @@ fi
 step "Run:ai control plane (images from ${RUNAI_IMAGE_REGISTRY})"
 # deploy_control_plane passes global.image.registry=localhost:${REGISTRY_PORT}/${LOCAL_IMAGE_REPO};
 # rewrite that one argument, then pin the whole release to the runai node.
-eval "$(declare -f deploy_control_plane | sed "s#\"localhost:\${REGISTRY_PORT}/\${LOCAL_IMAGE_REPO}\"#\"${RUNAI_IMAGE_REGISTRY}\"#")"
+use_hub_registry deploy_control_plane
 # The control plane's subcharts (Postgres, Keycloak, NATS) don't take a global nodeSelector, so the
 # release is not pinned; the runai node adds capacity for it and the scheduler spreads the pods.
 deploy_control_plane
@@ -75,7 +83,7 @@ CP_CLUSTER_NAME=acme-ai-factory
 provision_cluster_credentials
 
 step "Run:ai cluster chart (scheduler + resource management)"
-eval "$(declare -f deploy_runai_cluster | sed "s#\"localhost:\${REGISTRY_PORT}/\${LOCAL_IMAGE_REPO}\"#\"${RUNAI_IMAGE_REGISTRY}\"#g")"
+use_hub_registry deploy_runai_cluster
 deploy_runai_cluster
 
 step "fake GPUs on the gpu node"
