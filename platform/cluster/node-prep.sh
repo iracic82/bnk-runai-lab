@@ -39,6 +39,10 @@ node_prereqs() {
 net.bridge.bridge-nf-call-iptables  = 1
 net.bridge.bridge-nf-call-ip6tables = 1
 net.ipv4.ip_forward                 = 1
+# Run:ai + BNK + Prometheus exhaust Ubuntu's default 128 inotify instances; Dynamo's NATS config
+# reloader then dies with "too many open files" (seen live).
+fs.inotify.max_user_instances       = 1024
+fs.inotify.max_user_watches         = 524288
 SYS
   sysctl --system >/dev/null
 
