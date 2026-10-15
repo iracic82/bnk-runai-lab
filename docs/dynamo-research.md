@@ -67,34 +67,33 @@ From `lib/llm/src/protocols/common/extensions.rs` and
 - Request `"nvext": {"extra_fields": ["worker_id"]}` returns `nvext.worker_id.{prefill_worker_id,
   decode_worker_id,...}` in the response.
 
-## BNK 2.4 and Dynamo
+## BNK 2.4 and Dynamo: proven live (2026-10-15)
 
-What F5 says publicly (press and product pages, not product docs):
+BNK 2.4 documents a Dynamo integration in the F5 Endpoint Picker: `F5EPP spec.engine: dynamo` plus
+`spec.natsURL` (clouddocs, "Configure the Inference Data Path"). It works with Dynamo 1.5.1 when Dynamo
+is deployed the way NVIDIA documents it. Live result through the BNK VIP: two different prompt
+prefixes, six requests each, every one HTTP 200; prefix A always on worker 2609867643287794, prefix B
+always on worker 6381314717850254; the picker received Dynamo's kv-events and kv_metrics over NATS.
 
-- "BIG-IP Next for Kubernetes now leverages NVIDIA NIM statistics, Dynamo runtime signals, and GPU
-  telemetry to make inference-aware routing decisions" and "integration with NVIDIA Dynamo and KV Cache
-  Manager". Sources:
-  - https://www.businesswire.com/news/home/20260317977850/en/F5-and-NVIDIA-Advance-AI-Factory-Economics-With-New-Capabilities-for-Accelerated-AI-Inference
-  - https://www.f5.com/products/big-ip/next/kubernetes-on-nvidia-bluefield-dpu
-  - https://www.businesswire.com/news/home/20250611617990/en
+What it takes (each item was a failure before it was in place):
 
-❓ Not found in clouddocs: any BNK 2.4 CRD or field that targets Dynamo directly. **So the lab does not
-use one.** BNK reaches Dynamo with kinds already verified on BNK 2.4 in this repo
-(`docs/verified-names.md`, `controller/internal/bnk/objects.go`):
+| Requirement | Why |
+|---|---|
+| Dynamo operator (`dynamo-platform` 1.5.1 Helm chart, `global.nats.install=true`) and a `DynamoGraphDeployment` | The picker maps a pod to a Dynamo worker ID by hashing the pod name (`hash_pod_name`, dynamo `lib/runtime/src/discovery/kube/utils.rs`). Only Kubernetes discovery (the operator's default) registers workers under that ID. With `DYN_DISCOVERY_BACKEND=etcd` workers get random lease IDs and every request fails with `nvext.decode_worker_id=<n> does not identify a known worker`. |
+| A frontend sidecar per worker in direct mode (`frontendSidecar`, `dynamo.frontend --router-mode direct`) | Dynamo's own Gateway API guide. The picker writes the chosen worker into `nvext.decode_worker_id`; the sidecar serves exactly that worker. Without an ID it returns 400 `worker ID required ... Direct routing mode`. |
+| InferencePool selecting the operator's labels (`nvidia.com/dynamo-graph-deployment-name`, `nvidia.com/dynamo-component-type: decode`), target port 8000 | Only workers, never the frontend. |
+| F5EPP `engine: dynamo`, `natsURL` = the platform NATS, `server.modelServerMetricsPort: 9090` | Operator sets `DYN_SYSTEM_PORT=9090`; Mocker exports `vllm:*` series there after first traffic. |
+| F5EPP `eppConfig.config.plugins` override of `dynamo-wire` topics: `component.backend.endpoint.generate.kv-events` / `...kv_metrics` | BNK 2.4's default subscribes to `namespace.*.component.backend.kv-events`; Dynamo 1.5.1 publishes per endpoint (`namespace.<ns>.component.backend.endpoint.generate.kv-events`). Without the override routing still works but without KV events (`received=0`). Documented F5EPP merge override; question for F5 whether the default will change. |
+| Node `fs.inotify.max_user_instances` >= 1024 | The platform NATS config reloader crash-loops with `too many open files` on Ubuntu's 128. |
 
-1. The tenancy controller gives Run:ai project `dynamo` its normal tenant: Gateway `tenant-dynamo`
-   (VIP from 172.16.201.110-149, port 8000), HTTPRoute `tenant-route` /v1 → InferencePool `model-pool`,
-   F5EPP `model-pool-epp`, rate-limit iRule.
-2. The Dynamo frontend pod carries `app.kubernetes.io/part-of=model-server`, so it is the endpoint of
-   `model-pool`.
-3. `platform/dynamo/route.yaml` adds HTTPRoute `dynamo-route` (gateway.networking.k8s.io/v1) on the same
-   Gateway, with longer path prefixes (`/v1/chat/completions`, `/v1/completions`, `/v1/models`) straight
-   to Service `dynamo-frontend:8000`.
+Other facts from the live session:
 
-Either route ends at the Dynamo frontend, which then picks the worker. ⚠️ Open: which of the two routes
-BNK prefers (Gateway API says the longest prefix wins), and whether F5EPP (engine `vllm`) scores a
-Dynamo frontend cleanly when it lacks `vllm:` metrics. The check script only asserts a 200 through the
-VIP, which either path satisfies.
+- The release note says `x-worker-id`; the picker actually uses `nvext.decode_worker_id`. Dynamo ignores
+  an `x-worker-id` header (it accepts `x-dynamo-worker-instance-id` / `x-worker-instance-id`).
+- Dynamo's own router (`--router-mode kv` frontend) is not in the request path in this mode: BNK picks the
+  worker.
+- Kept Run:ai in charge: the DGD pod templates set `schedulerName: runai-scheduler`, label
+  `runai/queue: dynamo` and annotation `gpu-fraction: "0.5"`; the operator passes them through.
 
 ## Risks
 
