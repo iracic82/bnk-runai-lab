@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Track setup, run on the control node: cluster + BNK 2.4, then Run:ai, then the lab layer.
+# Each stage logs to /root/setup/*.log; failures stop the setup with the stage named.
+set -uo pipefail
+export DEBIAN_FRONTEND=noninteractive
+LAB_ROOT="${LAB_ROOT:-/root/lab}"
+install -d -m 700 /root/setup
+fail() { echo "SETUP FAILED: $*" >&2; exit 1; }
+
+apt-get update -qq && apt-get install -y -qq git curl ca-certificates jq >/dev/null
+if [ ! -d "$LAB_ROOT/.git" ]; then
+  auth=""
+  [ -n "${GH_READ_TOKEN:-}" ] && auth="Authorization: Basic $(printf 'x-access-token:%s' "$GH_READ_TOKEN" | base64 | tr -d '\n')"
+  GIT_CONFIG_COUNT=$([ -n "$auth" ] && echo 1 || echo 0) \
+  GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" GIT_CONFIG_VALUE_0="$auth" \
+    git clone -q --depth 1 "https://${LAB_REPO:-github.com/iracic82/bnk-runai-lab.git}" "$LAB_ROOT" \
+    || fail "could not clone the lab repo (GH_READ_TOKEN?)"
+fi
+
+bash "$LAB_ROOT/platform/cluster/setup-cluster.sh" 2>&1 | tee /root/setup/cluster.log
+[ "${PIPESTATUS[0]}" = 0 ] || fail "cluster + BNK setup, see /root/setup/cluster.log"
+
+bash "$LAB_ROOT/platform/runai/install.sh" 2>&1 | tee /root/setup/runai.log
+[ "${PIPESTATUS[0]}" = 0 ] || fail "Run:ai install, see /root/setup/runai.log"
+
+ln -sf "$LAB_ROOT/labctl/labctl" /usr/local/bin/labctl
+# The Instruqt terminal does not source .bashrc; make every shell land in the lab with kubectl ready.
+cat > /etc/profile.d/lab.sh <<PROF
+export KUBECONFIG=/etc/kubernetes/admin.conf
+export LAB_ROOT=$LAB_ROOT
+cd $LAB_ROOT 2>/dev/null || true
+PROF
+echo "SETUP DONE"

@@ -1,0 +1,36 @@
+# TMM VLANs + self-IPs over the two data NICs. Copied from the UDF's working config (BNK 2.2, same
+# model in 2.4). interfaces "1.1"/"1.2" are TMM interface names assigned from CNEInstance.networkAttachments
+# order [external-net, internal-net]. selfip_v4s are the addresses TMM owns on each VLAN:
+#   - external-vlan 10.1.10.201 : the next-hop the client routes the VIP subnet to (TMM's front door)
+#   - internal-vlan 10.1.20.201 : TMM's address toward the backend pods
+# tag 0 = untagged (each VLAN has its own gretap bridge, so no 802.1q tag is needed). internal:true means
+# the self-IPs are not externally advertised (matches the UDF's external-vlan + internal-vlan).
+#
+# Applied AFTER the BNK install, once TMM exists with both macvlan interfaces.
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKVlan
+metadata:
+  name: external-vlan
+  namespace: f5-bnk
+spec:
+  name: external-vlan
+  interfaces: ["1.1"]
+  internal: true
+  tag: 0
+  prefixlen_v4: 24
+  selfip_v4s: ["10.1.10.201"]
+  auto_lasthop: AUTO_LASTHOP_ENABLED
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKVlan
+metadata:
+  name: internal-vlan
+  namespace: f5-bnk
+spec:
+  name: internal-vlan
+  interfaces: ["1.2"]
+  internal: true
+  tag: 0
+  prefixlen_v4: 24
+  selfip_v4s: ["10.1.20.201"]
+  auto_lasthop: AUTO_LASTHOP_ENABLED

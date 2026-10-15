@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+export KUBECONFIG=/etc/kubernetes/admin.conf
+[ "$(kubectl get nodes --no-headers | grep -c ' Ready ')" -ge 4 ] || { fail-message "Not all four nodes are Ready yet."; exit 1; }
+g=$(kubectl get node gpu -o jsonpath='{.status.allocatable.nvidia\.com/gpu}')
+[ "${g:-0}" -ge 1 ] || { fail-message "The gpu node has no simulated GPUs yet."; exit 1; }
+kubectl get pods -n f5-bnk -l app=f5-tmm --no-headers | grep -q Running || { fail-message "BNK TMM is not running."; exit 1; }
+kubectl get pods -n runai --no-headers | grep -q Running || { fail-message "Run:ai cluster services are not running yet."; exit 1; }

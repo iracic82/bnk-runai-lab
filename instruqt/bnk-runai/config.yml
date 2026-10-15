@@ -1,0 +1,39 @@
+version: "3"
+# BNK 2.4 x open-source NVIDIA Run:ai on a real four-node Kubernetes cluster.
+# Cluster + BNK are the proven bnk-ai-kv-lab setup (platform/cluster/setup-cluster.sh); Run:ai is
+# installed on top from images published by the runai-image-build track (docs/build-and-deploy-flow.md).
+virtualmachines:
+# Control plane and the host the learner works on (Grafana, Prometheus, the tenancy controller).
+- name: control
+  image: f5/bnk-f5
+  machine_type: n2-standard-16
+  shell: /bin/bash
+  ports:
+  - 3000   # grafana
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+    LAB_ROOT: /root/lab
+# Simulated BlueField DPU: runs BNK's TMM data plane, one end of the gretap "pcie" link.
+- name: dpu
+  image: f5/bnk-f5
+  machine_type: n2-standard-8
+  shell: /bin/bash
+# GPU server: fake GPUs, Run:ai cluster agent and scheduler, model pods; other end of the pcie link.
+- name: gpu
+  image: f5/bnk-f5
+  machine_type: n2-standard-16
+  shell: /bin/bash
+# Run:ai control plane (about 50 services incl. Keycloak, Postgres, NATS), kept off the BNK nodes.
+- name: runai
+  image: f5/bnk-f5
+  machine_type: n2-standard-16
+  shell: /bin/bash
+# Team secrets (write only): FAR_PULL_B64 F5 registry credential, BNK_LICENSE_JWT licence,
+# GH_READ_TOKEN read-only token for the private lab repo.
+secrets:
+- name: FAR_PULL_B64
+  key: FAR_PULL_B64
+- name: BNK_LICENSE_JWT
+  key: BNK_LICENSE_JWT
+- name: GH_READ_TOKEN
+  key: GH_READ_TOKEN

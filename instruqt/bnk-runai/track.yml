@@ -1,0 +1,34 @@
+slug: bnk-runai
+title: BNK 2.4 with open-source NVIDIA Run:ai
+teaser: "Define a tenant once in Run:ai and BNK serves, limits and meters it. Real BNK 2.4 and open-source Run:ai, simulated GPUs."
+description: |-
+  **One tenant model for the whole AI factory.**
+
+  NVIDIA Run:ai decides who gets GPUs. F5 BIG-IP Next for Kubernetes (BNK) 2.4 decides how requests
+  reach them. In this lab a small open-source controller connects the two: create a project in Run:ai
+  and BNK gives it a front door, a rate limit taken from its GPU quota, and per-project token metering.
+  Delete the project and BNK removes it.
+
+  Everything is real software: BNK 2.4 and the open-source Run:ai control plane and scheduler. Only the
+  hardware is simulated. GPUs come from NVIDIA's fake-gpu-operator and the models are vLLM simulators.
+  The BlueField DPU is simulated as a separate node with a tunnel to the GPU node, so the request path is
+  the real one, but DPU offload itself is not measured here.
+tags:
+- runai
+- bnk
+- kubernetes
+- f5
+- ai
+owner: f5
+developers:
+- iracic@infoblox.com
+show_timer: true
+skipping_enabled: true
+idle_timeout: 14400
+timelimit: 14400
+lab_config:
+  sidebar_enabled: true
+  feedback_recap_enabled: true
+  feedback_tab_enabled: false
+  loadingMessages: true
+  hideStopButton: false
