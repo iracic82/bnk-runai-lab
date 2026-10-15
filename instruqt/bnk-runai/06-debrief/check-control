@@ -1,3 +1,10 @@
 #!/usr/bin/env bash
-# The debrief has nothing to verify.
+# The agent's project exists in Run:ai and BNK serves it.
+export KUBECONFIG=/etc/kubernetes/admin.conf
+kubectl get projects.kai.resources agent-demo >/dev/null 2>&1 \
+  || { fail-message "No Run:ai project agent-demo yet. Run the MCP demo: bash /root/lab/platform/mcp/demo.sh agent-demo 1"; exit 1; }
+VIP=$(kubectl get gateway -n f5-bnk agent-demo -o jsonpath='{.spec.addresses[0].value}' 2>/dev/null)
+[ -n "$VIP" ] || { fail-message "BNK has no Gateway for agent-demo yet. Give the controller a few seconds and check again."; exit 1; }
+curl -s -m 10 -i "http://$VIP:8000/v1/models" | grep -qi '^x-bnk-tenant: agent-demo' \
+  || { fail-message "agent-demo does not answer through BNK yet. Run: labctl model deploy agent-demo"; exit 1; }
 exit 0

@@ -100,11 +100,47 @@ where TMM runs is up to BNK.
 
 ---
 
-## Optional stretch
+## Let an AI agent do it
 
-The same objects are a natural surface for an AI agent. The repo ships a stateless MCP server,
-`bnk-tenancy-mcp`, that answers "what is this project's front door and how many tokens has it used",
-next to NVIDIA's own Run:ai MCP server. See `docs/mcp.md` in the **Lab code** tab. Not part of the graded
-challenges.
+Everything you did by hand in this lab can be asked for by an agent. The lab runs two MCP servers side
+by side. One is NVIDIA's own Run:ai MCP server, which can create and manage Run:ai projects. The other
+is `bnk-tenancy-mcp` from this repo, which answers what BNK built for a project: its address, its rate
+limit and the tokens it has used.
 
-Click **Check** to finish.
+The demo script plays the agent. Every step is a plain MCP message over HTTP, the same thing Claude or
+any other MCP client would send. It asks Run:ai for a new project called `agent-demo` with one GPU,
+first as a dry run so nothing changes, then for real. After that it only asks BNK questions.
+
+```bash,run
+bash /root/lab/platform/mcp/demo.sh agent-demo 1
+```
+
+You should see the dry run preview, then `applied=true` with a Run:ai project id. A few seconds later
+the BNK side answers with a VIP, `Programmed True`, a rate limit of 20 req/s from the one GPU, and a
+token count of 0 because nothing has called it yet.
+
+The agent never touched BNK. It asked Run:ai for a tenant, and the tenancy controller did the rest,
+exactly as it did for `tenant-a` and `tenant-b`. Look at the **Run:ai UI** tab and `agent-demo` is
+there next to the other projects.
+
+The project has a front door but nothing behind it yet. Give it a model, the same way you did for
+`tenant-a`, and send it one request:
+
+```bash,run
+labctl model deploy agent-demo
+VIP=$(kubectl get gateway -n f5-bnk agent-demo -o jsonpath='{.spec.addresses[0].value}')
+curl -s -i "http://$VIP:8000/v1/models" | grep -iE '^HTTP|x-bnk-tenant'
+```
+
+You should see `HTTP/1.1 200 OK` and `X-BNK-Tenant: agent-demo`.
+
+In **Grafana**, `agent-demo` now shows up in the per-project panels, with its own GPU share and
+request rate.
+
+Only one of the two servers can change anything. The Run:ai server needs a Run:ai login and
+shows a dry run before it creates a project. `bnk-tenancy-mcp` is read-only and holds no session, so
+an agent can call it as often as it likes. The details are in `docs/mcp.md` in the **Lab code** tab.
+
+---
+
+Click **Check**. It passes once `agent-demo` answers through BNK.

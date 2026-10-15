@@ -964,7 +964,7 @@
             }
           },
           "min": 0,
-          "noValue": "No vLLM server in this project (Dynamo projects run Mocker workers)"
+          "noValue": "No vLLM model in this project yet (labctl model deploy). Dynamo projects run Mocker workers."
         },
         "overrides": [
           {
@@ -1034,7 +1034,7 @@
             }
           },
           "min": 0,
-          "noValue": "No vLLM server in this project (Dynamo projects run Mocker workers)"
+          "noValue": "No vLLM model in this project yet (labctl model deploy). Dynamo projects run Mocker workers."
         },
         "overrides": []
       },
@@ -1088,7 +1088,7 @@
             }
           },
           "min": 0,
-          "noValue": "No vLLM server in this project (Dynamo projects run Mocker workers)"
+          "noValue": "No vLLM model in this project yet (labctl model deploy). Dynamo projects run Mocker workers."
         },
         "overrides": []
       },
@@ -1152,7 +1152,7 @@
             }
           },
           "min": 0,
-          "noValue": "No vLLM server in this project (Dynamo projects run Mocker workers)"
+          "noValue": "No vLLM model in this project yet (labctl model deploy). Dynamo projects run Mocker workers."
         },
         "overrides": []
       },

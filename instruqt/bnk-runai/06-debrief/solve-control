@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
-# Nothing to solve: the debrief is reading only.
-exit 0
+export KUBECONFIG=/etc/kubernetes/admin.conf
+bash /root/lab/platform/mcp/demo.sh agent-demo 1
+/root/lab/labctl/labctl model deploy agent-demo
