@@ -329,7 +329,7 @@ tenant_show() {
     "",
     "BNK tenant (label tenancy.f5.com/project=\(.project))",
     "  VIP           \(.bnk.vip // "not assigned yet")",
-    "  rate limit    \(if .bnk.rateLimitRps then "\(.bnk.rateLimitRps) req/s (iRule tenant-\(.project)-limit)" else "-" end)",
+    "  rate limit    \(if .bnk.rateLimitRps then "\(.bnk.rateLimitRps) req/s (iRule \(.project)-limit)" else "-" end)",
     "  last event    \(.bnk.lastEvent // "-")",
     "  tokens        \(if .bnk.tokensMetered == null then "-" elif (.bnk.tokensMetered|type)=="object" then (.bnk.tokensMetered | to_entries | map("\(.key)=\(.value)") | join(" ")) else (.bnk.tokensMetered|tostring) end)  (ConfigMap \(env.TENANCY_NS // "bnk-runai-tenancy")/bnk-runai-usage)",
     (if (.bnk.objects|length)==0 then "  objects       none yet" else (.bnk.objects[] | "  \(.kind|.+"              "|.[0:14]) \(.namespace)/\(.name)") end)
