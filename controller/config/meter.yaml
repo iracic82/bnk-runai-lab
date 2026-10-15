@@ -1,5 +1,5 @@
 # Token meter: collects the usage lines the tenant iRules record at the BNK front door, exports them on
-# :9100/metrics and keeps per-project token totals (rolled up per Department) in the bnk-runai-usage ledger.
+# :9102/metrics and keeps per-project token totals (rolled up per Department) in the bnk-runai-usage ledger.
 #
 # Data path: every --flush-interval the meter sends GET /bnk/flush (X-BNK-Flush: <token>) to each tenant
 # Gateway VIP; the iRule answers 204 and sends its parked lines over TCP from TMM to --metering-sink, the
@@ -120,7 +120,7 @@ spec:
       labels: {app.kubernetes.io/name: bnk-runai-meter}
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "9100"
+        prometheus.io/port: "9102"
     spec:
       serviceAccountName: bnk-runai-meter
       # TMM sends usage to the control node's own IP, so the meter listens on the host network there.
@@ -136,7 +136,7 @@ spec:
           image: docker.io/iracic82/bnk-runai-meter:0.1.2
           args:
             - --listen=:5514
-            - --metrics-bind-address=:9100
+            - --metrics-bind-address=:9102
             # LAB: TMM self-IP(s) on the internal VLAN; confirm in the sandbox (and add the TMM pod CIDR if
             # TMM's sideband connections are sourced from it).
             - --allowed-peers=10.1.10.201
@@ -146,9 +146,9 @@ spec:
             - --writeback-interval=30s
           ports:
             - {name: usage, containerPort: 5514, hostPort: 5514, protocol: TCP}
-            - {name: metrics, containerPort: 9100, hostPort: 9100, protocol: TCP}
-          livenessProbe: {httpGet: {path: /healthz, port: 9100}}
-          readinessProbe: {httpGet: {path: /healthz, port: 9100}}
+            - {name: metrics, containerPort: 9102, hostPort: 9102, protocol: TCP}
+          livenessProbe: {httpGet: {path: /healthz, port: 9102}}
+          readinessProbe: {httpGet: {path: /healthz, port: 9102}}
           volumeMounts:
             - {name: token, mountPath: /var/run/bnk-metering, readOnly: true}
           resources:
@@ -167,4 +167,4 @@ metadata:
   labels: {app.kubernetes.io/name: bnk-runai-meter}
 spec:
   selector: {app.kubernetes.io/name: bnk-runai-meter}
-  ports: [{name: metrics, port: 9100, targetPort: 9100}]
+  ports: [{name: metrics, port: 9102, targetPort: 9102}]

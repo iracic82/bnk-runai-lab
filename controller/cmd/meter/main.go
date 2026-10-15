@@ -2,7 +2,7 @@
 //
 // Every interval it asks each tenant Gateway's iRule to flush its parked usage lines (GET /bnk/flush);
 // the iRule sends them over TCP to this process (:5514), which counts them into Prometheus series on
-// :9100/metrics and writes each Run:ai Project's token total back as annotations, rolled up per Department.
+// :9102/metrics and writes each Run:ai Project's token total back as annotations, rolled up per Department.
 package main
 
 import (
@@ -41,7 +41,7 @@ func main() {
 		ledgerNamespace                                     string
 	)
 	flag.StringVar(&listen, "listen", ":5514", "TCP address the iRules send usage lines to")
-	flag.StringVar(&metricsAddr, "metrics-bind-address", ":9100", "Prometheus /metrics endpoint")
+	flag.StringVar(&metricsAddr, "metrics-bind-address", ":9102", "Prometheus /metrics endpoint")
 	flag.StringVar(&peers, "allowed-peers", "", "comma-separated IPs/CIDRs allowed to send usage (TMM self-IPs); empty rejects all")
 	flag.StringVar(&tokenFile, "metering-token-file", "", "file holding the shared metering token (iRule auth line and /bnk/flush)")
 	flag.StringVar(&bnkNamespace, "bnk-namespace", "f5-bnk", "namespace of the tenant Gateways to flush")

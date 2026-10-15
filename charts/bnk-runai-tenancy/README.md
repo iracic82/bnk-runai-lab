@@ -77,7 +77,7 @@ helm install bnk-runai-tenancy charts/bnk-runai-tenancy -n bnk-runai-tenancy --c
 | `meter.image.repository` | `docker.io/iracic82/bnk-runai-meter` | Meter image |
 | `meter.image.tag` | `0.1.1` | Meter image tag |
 | `meter.image.pullPolicy` | `IfNotPresent` | Meter pull policy |
-| `meter.usagePort` / `metricsPort` | `5514` / `9100` | Host ports (meter runs with `hostNetwork`) |
+| `meter.usagePort` / `metricsPort` | `5514` / `9102` | Host ports (meter runs with `hostNetwork`) |
 | `meter.nodeSelector` | `{node-role.kubernetes.io/control-plane: ""}` | Meter placement |
 | `meter.tolerations` | control-plane and master `NoSchedule` | Meter tolerations |
 | `meter.resources` | req `20m`/`32Mi`, limit `128Mi` | Meter resources |

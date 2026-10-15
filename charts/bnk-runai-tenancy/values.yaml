@@ -84,8 +84,8 @@ meter:
     pullPolicy: IfNotPresent
   # --listen port (also the hostPort TMM connects to).
   usagePort: 5514
-  # --metrics-bind-address port (also a hostPort).
-  metricsPort: 9100
+  # --metrics-bind-address port (also a hostPort). Not 9100: node-exporter holds 9100 on every node.
+  metricsPort: 9102
   # TMM sends usage to the control node's own IP, so the meter runs there on the host network.
   nodeSelector:
     node-role.kubernetes.io/control-plane: ""

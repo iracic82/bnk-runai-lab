@@ -128,7 +128,7 @@ is the two added together. Now check the ledger against the meter's own counters
 
 ```bash,run
 M=$(kubectl get node control -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
-curl -s http://$M:9100/metrics | grep -E '^bnk_tokens_total' | grep -v 'model="none"'
+curl -s http://$M:9102/metrics | grep -E '^bnk_tokens_total' | grep -v 'model="none"'
 ```
 
 **You should see:** a project's prompt and completion tokens add up to its ledger total, give or take
