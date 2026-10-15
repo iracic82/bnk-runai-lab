@@ -14,8 +14,12 @@ step() { echo; echo "### $*"; }
 clone() {
   [ -d "$3/.git" ] && return 0
   local url
-  if [ -n "${GH_READ_TOKEN:-}" ]; then url="https://x-access-token:${GH_READ_TOKEN}@$1"; else url="https://$1"; fi
-  git clone --depth 1 --branch "$2" "$url" "$3" 2>&1 | sed "s#${GH_READ_TOKEN:-__no_token__}#REDACTED#g" \
+  # Token goes in a one-command auth header (GIT_CONFIG_* env), never in the URL, argv or .git/config.
+  local auth=""
+  [ -n "${GH_READ_TOKEN:-}" ] && auth="Authorization: Basic $(printf 'x-access-token:%s' "$GH_READ_TOKEN" | base64 | tr -d '\n')"
+  GIT_CONFIG_COUNT=$([ -n "$auth" ] && echo 1 || echo 0) \
+  GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" GIT_CONFIG_VALUE_0="$auth" \
+    git clone -q --depth 1 --branch "$2" "https://$1" "$3" \
     || fail "could not clone $1. If it is private, set the GH_READ_TOKEN secret."
 }
 
