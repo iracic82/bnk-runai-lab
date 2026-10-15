@@ -301,7 +301,28 @@ sed -i -E \
 # namespace leaves its cache unsynced and the f5-cne-controller restarts forever (seen live 2026-10-15).
 # Run:ai adopts these namespaces when the projects are created in challenge 2.
 for ns in ${BNK_EPP_NAMESPACES//,/ }; do kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -; done
-"$INSTALLER" --env lab --profile host --skip-license || fail "the BNK install did not complete"
+# bnk-deploy's last phase is verification. It can catch DSSM (BNK's 3-replica state store) mid-settle:
+# the wait loop sees DSSMAvailable=True, the check a second later reads it False (seen 2026-10-15, with
+# every pod Running). So if the installer fails, wait for the CNEInstance itself before giving up, and
+# fail only if a component other than TMM/Available is still not ready.
+if ! "$INSTALLER" --env lab --profile host --skip-license; then
+  echo "  installer verification failed; waiting up to 10 min for the BNK components to settle"
+  settled=0
+  for i in $(seq 1 60); do
+    notready=$(kubectl get cneinstance f5-bnk-instance -n f5-bnk \
+      -o jsonpath='{range .status.conditions[*]}{.type}={.status} {end}' 2>/dev/null | tr ' ' '\n' \
+      | grep '=False$' | grep -vE '^(Available|F5TmmAvailable)=' | paste -sd, - || true)
+    if [ -z "$notready" ] && ! kubectl get pods -A --no-headers 2>/dev/null | grep -E '^(f5-bnk|f5-cne-core) ' | grep -qE 'CrashLoopBackOff|ImagePullBackOff|ErrImagePull'; then
+      echo "  BNK components settled after $((i*10))s"; settled=1; break
+    fi
+    sleep 10
+  done
+  if [ "$settled" != 1 ]; then
+    kubectl get cneinstance f5-bnk-instance -n f5-bnk -o jsonpath='{range .status.conditions[*]}  {.type}={.status} {.message}{"\n"}{end}' || true
+    kubectl get pods -n f5-bnk --no-headers | grep -vE 'Running|Completed' || true
+    fail "the BNK install did not complete (still not ready: ${notready:-see conditions above})"
+  fi
+fi
 # Belt and braces: confirm the attachments actually landed on the CNEInstance (this is what was silently
 # missing before), and patch them in if not - the operator then re-renders TMM with both macvlan legs.
 CNE="$(kubectl get cneinstance -n f5-bnk -o name | head -1)"
