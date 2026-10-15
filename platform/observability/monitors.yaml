@@ -5,7 +5,7 @@
 # (charts/bnk-runai-tenancy, monitoring.enabled=true).
 
 # Model servers (vllm-twin sims) in every Run:ai project namespace, deployed by `labctl model deploy`.
-# Each series gets project = the pod's tenancy.f5.com/project label, else the runai-<project> namespace.
+# Each series gets project = the <project> part of its runai-<project> namespace (never a pod label).
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
