@@ -14,6 +14,8 @@ export DEBIAN_FRONTEND=noninteractive
 # preflight deps (dropping them fails preflight with "make not on PATH"); the rest are base node
 # deps. Keep this list in parity with the agentic track. Demo-specific packages (screen,
 # python3-flask for the control API) are installed further down.
+echo 'DPkg::Lock::Timeout "900";' > /etc/apt/apt.conf.d/99lab-lock-timeout
+systemctl disable --now unattended-upgrades apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true
 apt-get update -qq
 apt-get install -y -qq git apt-transport-https ca-certificates curl gpg containerd make openssl python3-yaml ethtool jq
 
@@ -167,6 +169,8 @@ prep_and_join() {
     echo 'set -uo pipefail'; echo 'export DEBIAN_FRONTEND=noninteractive'
     echo "K8S_MINOR='${K8S_MINOR}'"
     cat "${PLATFORM}/cluster/node-prep.sh"
+    echo "echo 'DPkg::Lock::Timeout \"900\";' > /etc/apt/apt.conf.d/99lab-lock-timeout"
+    echo 'systemctl disable --now unattended-upgrades apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true'
     echo 'apt-get update -qq'
     echo 'apt-get install -y -qq apt-transport-https ca-certificates curl gpg containerd ethtool'
     echo 'node_prereqs'; echo 'install_kubernetes'

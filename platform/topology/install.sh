@@ -16,7 +16,7 @@ systemctl daemon-reload
 systemctl enable --now lab-topology >/dev/null
 systemctl restart lab-topology
 for i in $(seq 1 20); do
-  curl -fsS -o /dev/null http://127.0.0.1:3002/topology.html && { echo "  topology page on :3002"; exit 0; }
+  curl -fs -o /dev/null http://127.0.0.1:3002/topology.html && { echo "  topology page on :3002"; exit 0; }
   sleep 1
 done
 echo "  topology page did not answer on :3002" >&2; exit 1

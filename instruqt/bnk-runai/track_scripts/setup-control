@@ -7,6 +7,9 @@ LAB_ROOT="${LAB_ROOT:-/root/lab}"
 install -d -m 700 /root/setup
 fail() { echo "SETUP FAILED: $*" >&2; exit 1; }
 
+# Ubuntu's unattended-upgrades grabs the dpkg lock at boot; apt waits for it instead of failing.
+echo 'DPkg::Lock::Timeout "900";' > /etc/apt/apt.conf.d/99lab-lock-timeout
+systemctl disable --now unattended-upgrades apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true
 apt-get update -qq && apt-get install -y -qq git curl ca-certificates jq >/dev/null
 if [ ! -d "$LAB_ROOT/.git" ]; then
   auth=""
