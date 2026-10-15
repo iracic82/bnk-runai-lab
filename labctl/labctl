@@ -245,9 +245,11 @@ tenant_create() {
   else
     action=created
     local did; did="$(api_department_id "${dept:-$DEFAULT_DEPARTMENT}")"
+    # No requestedNamespace: with it, Run:ai expects the namespace to exist already ("Can't find namespace
+    # for project", seen live). Without it Run:ai creates runai-<name> itself.
     id="$(api POST /api/v1/org-unit/projects "$(jq -nc --arg n "$name" --arg c "$CLUSTER_ID" --arg p "$did" \
-      --arg ns "runai-$name" --argjson r "$res" \
-      '{name:$n, clusterId:$c, parentId:$p, requestedNamespace:$ns, resources:$r}')" | jq -r '.id')"
+      --argjson r "$res" \
+      '{name:$n, clusterId:$c, parentId:$p, resources:$r}')" | jq -r '.id')"
   fi
   info "Run:ai project $name $action (id $id): gpu deserved $gpu${rank:+, rank $rank ($(rank_value "$rank"))}"
   if [ "$wait" = 1 ]; then
