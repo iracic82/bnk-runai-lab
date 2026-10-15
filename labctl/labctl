@@ -520,7 +520,7 @@ cmd_load() {
     case "$1" in
       --tenant) tenant="$2"; shift 2 ;;
       --seconds) seconds="$2"; shift 2 ;;
-      --rps|--max-tokens|--prefixes|--timeout|--concurrency) extra+=("$1" "$2"); shift 2 ;;
+      --rps|--max-tokens|--prefixes|--timeout|--concurrency|--model) extra+=("$1" "$2"); shift 2 ;;
       --json) extra+=(--json); shift ;;
       *) die "unknown option $1" ;;
     esac

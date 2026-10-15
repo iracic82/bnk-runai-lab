@@ -17,6 +17,7 @@ Profiles:
 import argparse
 import json
 import random
+import signal
 import sys
 import threading
 import time
@@ -75,12 +76,24 @@ def payload(profile, model, seq):
     return json.dumps(body).encode()
 
 
-def discover_model(url, timeout):
-    try:
-        with urllib.request.urlopen(url + "/v1/models", timeout=timeout) as r:
-            return (json.load(r).get("data") or [{}])[0].get("id")
-    except Exception:  # a refused or unreachable /v1/models just means: send no model field
-        return None
+def discover_model(url, timeout, attempts=10):
+    """The model id the tenant serves. A 429 here means this second's rate-limit budget is spent
+    (often by the previous command), so wait Retry-After and ask again rather than give up."""
+    for _ in range(attempts):
+        try:
+            with urllib.request.urlopen(url + "/v1/models", timeout=timeout) as r:
+                return (json.load(r).get("data") or [{}])[0].get("id")
+        except urllib.error.HTTPError as e:
+            if e.code != 429:
+                return None
+            try:
+                wait = float(e.headers.get("Retry-After") or 1)
+            except ValueError:
+                wait = 1.0
+            time.sleep(min(max(wait, 0.5), 5))
+        except Exception:
+            return None
+    return None
 
 
 def pct(values, p):
@@ -154,6 +167,7 @@ def main():
     ap.add_argument("--seconds", type=int, default=30)
     ap.add_argument("--rps", type=float, help="override the profile's request rate")
     ap.add_argument("--max-tokens", type=int, help="override the profile's max_tokens")
+    ap.add_argument("--model", help="model id to send (default: read from /v1/models)")
     ap.add_argument("--prefixes", type=int, default=4, help="distinct shared prefixes (prefix-heavy)")
     ap.add_argument("--timeout", type=float, default=30.0, help="per-request timeout in seconds")
     ap.add_argument("--concurrency", type=int, default=0, help="worker threads (default: rps x 15, max 600)")
@@ -170,7 +184,11 @@ def main():
     url = a.url.rstrip("/")
     rps = max(0.1, profile["rps"])
     log = sys.stderr if a.json else sys.stdout
-    model = discover_model(url, min(5.0, a.timeout))
+    model = a.model or discover_model(url, min(5.0, a.timeout))
+    if not model:
+        print(f"could not read the model from {url}/v1/models: is the tenant's model server up and its "
+              f"route programmed? Pass --model to skip discovery.", file=sys.stderr, flush=True)
+        return 2
     workers = a.concurrency or int(min(600, max(16, rps * 15)))
     tag = f"[{a.label}] " if a.label else ""
     print(f"{tag}profile={a.profile} rps={rps:g} seconds={a.seconds} max_tokens={profile['max_tokens']} "
@@ -251,4 +269,5 @@ def main():
 
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)  # `| head` ends the run quietly instead of a traceback
     sys.exit(main())
