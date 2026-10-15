@@ -2,8 +2,7 @@
 slug: debrief
 type: challenge
 title: What you built, and what's next
-teaser: A recap of the integration, what in this lab is real and what is simulated, and
-  what changes on a real BlueField-3 DPU.
+teaser: A recap of the integration, what in this lab is real and what is simulated, and what changes on a real BlueField-3 DPU.
 notes:
 - type: image
   url: ../assets/notes-06.png
@@ -14,15 +13,19 @@ tabs:
 - title: Grafana
   type: service
   hostname: control
+  path: /d/one-tenant-two-planes?orgId=1&kiosk
   port: 3000
-  path: /d/one-tenant-two-planes
+- title: Run:ai UI
+  type: service
+  hostname: control
+  port: 3001
 - title: Lab code
   type: code
   hostname: control
   path: /root/lab
 difficulty: basic
 timelimit: 900
-enhanced_loading: null
+enhanced_loading:
 ---
 ![What you built](../assets/06-recap.png)
 

@@ -110,12 +110,13 @@ spec:
         - name: manager
           image: docker.io/iracic82/bnk-runai-tenancy:0.1.6
           imagePullPolicy: Always
-          args: ["--leader-elect", "--bnk-namespace=f5-bnk", "--vip-range=172.16.201.110-172.16.201.149"]
-          # Token metering (config/meter.yaml): add
-          #   --metering-sink=<control-node 10.1.10.x IP>:5514
-          #   --metering-token-file=/var/run/bnk-metering/token
-          # and mount the bnk-metering-token Secret at /var/run/bnk-metering (see meter.yaml). The sink must
-          # be reachable from the TMM self-IP (10.1.10.201): confirm in the sandbox. Empty sink = metering off.
+          # Token metering: the iRules send usage from TMM to the meter on the control node, which sits on
+          # TMM's external network as 10.1.10.11 (platform/cluster/setup-cluster.sh). Remove both metering
+          # flags to run without metering.
+          args: ["--leader-elect", "--bnk-namespace=f5-bnk", "--vip-range=172.16.201.110-172.16.201.149",
+                 "--metering-sink=10.1.10.11:5514", "--metering-token-file=/var/run/bnk-metering/token"]
+          volumeMounts:
+            - {name: metering-token, mountPath: /var/run/bnk-metering, readOnly: true}
           ports:
             - {name: metrics, containerPort: 8080}
             - {name: probes, containerPort: 8081}
@@ -125,6 +126,9 @@ spec:
             requests: {cpu: 50m, memory: 64Mi}
             limits: {memory: 256Mi}
           securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, readOnlyRootFilesystem: true}
+      volumes:
+        - name: metering-token
+          secret: {secretName: bnk-metering-token, items: [{key: token, path: token}]}
 ---
 apiVersion: v1
 kind: Service

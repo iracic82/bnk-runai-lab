@@ -2,8 +2,7 @@
 slug: isolation-before-the-gpu
 type: challenge
 title: Isolation before the GPU
-teaser: One tenant floods its endpoint. BNK refuses the excess with a 429 before it
-  reaches the GPU both tenants share, and the other tenant never notices.
+teaser: One tenant floods its endpoint. BNK refuses the excess with a 429 before it reaches the GPU both tenants share, and the other tenant never notices.
 notes:
 - type: image
   url: ../assets/notes-03.png
@@ -17,15 +16,19 @@ tabs:
 - title: Grafana
   type: service
   hostname: control
+  path: /d/one-tenant-two-planes?orgId=1&kiosk
   port: 3000
-  path: /d/one-tenant-two-planes
+- title: Run:ai UI
+  type: service
+  hostname: control
+  port: 3001
 - title: Lab code
   type: code
   hostname: control
   path: /root/lab
 difficulty: intermediate
 timelimit: 1800
-enhanced_loading: null
+enhanced_loading:
 ---
 `tenant-a` and `tenant-b` share one GPU, half each. A GPU has no idea which tenant a request came
 from: it serves whatever arrives. If `tenant-b` sends ten times its fair load, `tenant-a`'s requests
@@ -94,8 +97,8 @@ The picker is an `F5EPP` object, created by the controller for each tenant. It s
 queue depth and by KV-cache prefix matches:
 
 ```bash,run
-kubectl get f5epp -n "$NS" model-pool-epp -o jsonpath='{.spec.eppConfig}' | jq .
-kubectl get inferencepool -n "$NS" model-pool -o jsonpath='{.spec.endpointPickerRef}' | jq .
+kubectl get f5-epps -n "$NS" model-pool-epp -o jsonpath='{.spec.eppConfig}' | jq .
+kubectl get inferencepools.inference.networking.k8s.io -n "$NS" model-pool -o jsonpath='{.spec.endpointPickerRef}' | jq .
 ```
 
 Send load where many requests share a long prompt prefix:

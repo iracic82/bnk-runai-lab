@@ -23,6 +23,32 @@ bash "$LAB_ROOT/platform/cluster/setup-cluster.sh" 2>&1 | tee /root/setup/cluste
 bash "$LAB_ROOT/platform/runai/install.sh" 2>&1 | tee /root/setup/runai.log
 [ "${PIPESTATUS[0]}" = 0 ] || fail "Run:ai install, see /root/setup/runai.log"
 
+# Lab layer: the tenancy controller, the token meter, Prometheus + Grafana, and the browser for the Run:ai UI.
+step() { echo "==== $(date +%H:%M:%S) $*"; }
+{
+  step "metering token"
+  kubectl create namespace bnk-runai-tenancy --dry-run=client -o yaml | kubectl apply -f -
+  kubectl -n bnk-runai-tenancy get secret bnk-metering-token >/dev/null 2>&1 || \
+    kubectl -n bnk-runai-tenancy create secret generic bnk-metering-token \
+      --from-literal=token="$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32)"
+  step "tenancy controller + token meter"
+  kubectl apply -f "$LAB_ROOT/controller/config/deploy.yaml"
+  kubectl apply -f "$LAB_ROOT/controller/config/meter.yaml"
+  kubectl -n bnk-runai-tenancy rollout status deploy/bnk-runai-tenancy --timeout=300s
+  kubectl -n bnk-runai-tenancy rollout status deploy/bnk-runai-meter --timeout=300s || true
+  step "Prometheus + Grafana"
+  bash "$LAB_ROOT/platform/observability/install.sh"
+  step "browser for the Run:ai UI"
+  bash "$LAB_ROOT/platform/browser/install.sh"
+} 2>&1 | tee /root/setup/lab.log
+[ "${PIPESTATUS[0]}" = 0 ] || fail "lab layer, see /root/setup/lab.log"
+
+# kubectl works on every node, not only control.
+for n in dpu gpu runai; do
+  ssh -o StrictHostKeyChecking=no -o BatchMode=yes "root@$n" 'install -d -m 700 /root/.kube' && \
+    scp -q -o StrictHostKeyChecking=no /etc/kubernetes/admin.conf "root@$n:/root/.kube/config" || true
+done
+
 ln -sf "$LAB_ROOT/labctl/labctl" /usr/local/bin/labctl
 # The Instruqt terminal does not source .bashrc; make every shell land in the lab with kubectl ready.
 cat > /etc/profile.d/lab.sh <<PROF

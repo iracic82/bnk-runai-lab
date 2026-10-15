@@ -133,7 +133,7 @@ spec:
       securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: meter
-          image: docker.io/iracic82/bnk-runai-meter:0.1.0
+          image: docker.io/iracic82/bnk-runai-meter:0.1.1
           args:
             - --listen=:5514
             - --metrics-bind-address=:9100

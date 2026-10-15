@@ -2,8 +2,7 @@
 slug: dynamo-on-runai
 type: challenge
 title: NVIDIA Dynamo on Run:ai, behind BNK
-teaser: Run the real Dynamo frontend and KV-aware router on simulated GPUs. Run:ai places
-  the workers, BNK serves the front door.
+teaser: Run the real Dynamo frontend and KV-aware router on simulated GPUs. Run:ai places the workers, BNK serves the front door.
 notes:
 - type: image
   url: ../assets/notes-05-dynamo.png
@@ -11,6 +10,15 @@ tabs:
 - title: Terminal
   type: terminal
   hostname: control
+- title: Run:ai UI
+  type: service
+  hostname: control
+  port: 3001
+- title: Grafana
+  type: service
+  hostname: control
+  path: /d/one-tenant-two-planes?orgId=1&kiosk
+  port: 3000
 - title: Lab code
   type: code
   hostname: control
@@ -20,7 +28,7 @@ tabs:
   hostname: gpu
 difficulty: intermediate
 timelimit: 2700
-enhanced_loading: null
+enhanced_loading:
 ---
 NVIDIA Dynamo is a serving layer for large models. Its frontend takes OpenAI-style requests and its
 router picks a worker, preferring the one that already holds the prompt's KV cache. Here Dynamo runs

@@ -2,8 +2,7 @@
 slug: tenant-defined-once
 type: challenge
 title: Define a tenant once
-teaser: Create two projects in Run:ai and watch BNK build a front door, a rate limit
-  and a route for each, with nothing configured in BNK by hand.
+teaser: Create two projects in Run:ai and watch BNK build a front door, a rate limit and a route for each, with nothing configured in BNK by hand.
 notes:
 - type: image
   url: ../assets/notes-02.png
@@ -11,22 +10,22 @@ tabs:
 - title: Terminal
   type: terminal
   hostname: control
-# TODO(verify on a live sandbox): the Run:ai UI is served by ingress-nginx (hostNetwork) on the runai
-# node with host rule runai.lab. Instruqt's service proxy sends its own Host header, so the ingress may
-# answer 404 and Keycloak may redirect to https://runai.lab. If so, add a catch-all ingress rule or
-# move the UI behind a NodePort service and point this tab at it.
 - title: Run:ai UI
   type: service
-  hostname: runai
-  port: 443
-  protocol: https
+  hostname: control
+  port: 3001
+- title: Grafana
+  type: service
+  hostname: control
+  path: /d/one-tenant-two-planes?orgId=1&kiosk
+  port: 3000
 - title: Lab code
   type: code
   hostname: control
   path: /root/lab
 difficulty: basic
 timelimit: 1800
-enhanced_loading: null
+enhanced_loading:
 ---
 In Run:ai, a **project** is the tenant: it owns a GPU quota, a priority and a namespace. In this
 challenge you create two projects and never touch BNK. The tenancy controller reads each project and
@@ -47,8 +46,19 @@ labctl tenant create tenant-a --gpu 2 --priority 150 --department acme
 labctl tenant create tenant-b --gpu 0.5 --priority 50
 ```
 
-`labctl` is a thin wrapper. What it created are ordinary Run:ai objects, `kai.resources/v1alpha1`
-Projects, cluster-scoped:
+`labctl` calls the **Run:ai REST API**, the same API the Run:ai UI and CLI use. Run:ai does not let
+anyone write projects with `kubectl`: its admission webhook allows only Run:ai's own services, so the
+API is the one front door for tenants. Here is the call `labctl` made, so nothing is hidden:
+
+```bash,run
+TOK=$(curl -s --cacert /etc/runai/ca.crt https://runai.lab/api/v1/token -H 'Content-Type: application/json' \
+  -d '{"grantType":"password","username":"admin@acme.lab","password":"Lab-Admin-1!"}' | jq -r .accessToken)
+curl -s --cacert /etc/runai/ca.crt https://runai.lab/api/v1/org-unit/projects -H "Authorization: Bearer $TOK" \
+  | jq '.projects[] | {id, name, parentId, gpu: .resources[0].gpu.deserved}'
+```
+
+Run:ai then writes the cluster object, an ordinary `kai.resources/v1alpha1` Project. That object is
+what the tenancy controller reads; it never writes to it:
 
 ```bash,run
 kubectl get projects.kai.resources
@@ -59,8 +69,9 @@ Look at `spec.parent` (the department), `spec.queues[].resources.gpu.deserved` (
 `spec.queues[].priority`, and `status.namespace`. The namespace is where the project's workloads run.
 The controller reads it from the status and never guesses it from the name.
 
-Open the **Run:ai UI** tab (user `admin@acme.lab`, password `Lab-Admin-1!`). Under **Projects** you
-will see both tenants with their quotas.
+Open the **Run:ai UI** tab and sign in as `admin@acme.lab` / `Lab-Admin-1!`. Under
+**Organization → Projects** you see both tenants with their GPU quotas. This is where a Run:ai admin
+works every day; nothing about BNK appears here, and nothing needs to.
 
 # Step 2: Put one model per tenant on the same GPU
 
@@ -78,7 +89,7 @@ for t in tenant-a tenant-b; do
   NS=$(kubectl get projects.kai.resources $t -o jsonpath='{.status.namespace}')
   kubectl get pods -n "$NS" -o wide -l app.kubernetes.io/part-of=model-server
   kubectl get pods -n "$NS" -l app.kubernetes.io/part-of=model-server \
-    -o custom-columns='POD:.metadata.name,SCHEDULER:.spec.schedulerName,GPU-FRACTION:.metadata.annotations.gpu-fraction,QUEUE:.metadata.labels.kai\.scheduler/queue'
+    -o custom-columns='POD:.metadata.name,SCHEDULER:.spec.schedulerName,GPU-FRACTION:.metadata.annotations.gpu-fraction,QUEUE:.metadata.labels.runai/queue'
 done
 ```
 
@@ -101,10 +112,10 @@ labctl tenant show tenant-a
 The same objects with plain `kubectl`. Everything carries the label `tenancy.f5.com/project`:
 
 ```bash,run
-kubectl get gateway -n f5-bnk -l tenancy.f5.com/project
+kubectl get gateway -n f5-bnk -l tenancy.f5.com/project -o wide
 NS=$(kubectl get projects.kai.resources tenant-a -o jsonpath='{.status.namespace}')
-kubectl get httproute,inferencepool,f5epp -n "$NS"
-kubectl get f5-big-cne-irules,netpolicy -n f5-bnk -l tenancy.f5.com/project=tenant-a
+kubectl get httproute,inferencepools.inference.networking.k8s.io,f5-epps -n "$NS"
+kubectl get f5-big-cne-irules,netpolicies -n f5-bnk -l tenancy.f5.com/project=tenant-a
 ```
 
 Per tenant that is a **Gateway** with its own address (named after the project, so `tenant-a`),
@@ -120,16 +131,16 @@ for t in tenant-a tenant-b; do
 done
 ```
 
-`tenant-a` gets 40 (2 GPU), `tenant-b` gets 10 (0.5 GPU). The controller also records each project's
-priority class on the Run:ai project event: 150 maps to Critical, 50 to Sheddable.
+`tenant-a` gets 40 (2 GPU), `tenant-b` gets 10 (0.5 GPU). The controller also derives a priority class
+from the Run:ai rank (Medium 150 is Critical, Low 50 is Sheddable) and posts it as an event on the
+Run:ai project:
 
 ```bash,run
 kubectl get events -A --field-selector involvedObject.kind=Project,reason=BNKTenantReady \
   -o custom-columns='PROJECT:.involvedObject.name,MESSAGE:.message'
 ```
 
-In this release BNK enforces the rate limit; the priority class is recorded for the scheduling work
-that follows.
+In this lab BNK enforces the rate limit; the priority class is recorded, not yet enforced.
 
 # Step 4: Chat through each tenant's front door
 
@@ -149,12 +160,13 @@ curl -si http://$VIP:8000/v1/models | grep -i -E '^HTTP|x-bnk-tenant'
 
 # Step 5: Change the quota in Run:ai, watch the limit follow
 
-Give `tenant-b` a full GPU. `labctl tenant create` applies the project, so running it again updates it
-(you could also edit the quota in the Run:ai UI):
+Give `tenant-b` a full GPU. Running `labctl tenant create` again updates the project through the Run:ai
+API. You could do the same in the **Run:ai UI** tab: edit `tenant-b`, set GPU quota to 1, save.
+Either way, Run:ai is the only place you change it:
 
 ```bash,run
 labctl tenant create tenant-b --gpu 1 --priority 50
-sleep 5
+sleep 15
 kubectl get f5-big-cne-irules -n f5-bnk tenant-b-limit -o jsonpath='{.spec.iRule}' | grep -o 'rl_n > [0-9]*'
 ```
 
@@ -171,15 +183,16 @@ Create a throwaway tenant, check BNK built it, then delete it:
 ```bash,run
 labctl tenant create tenant-c --gpu 0.25 --priority 10
 sleep 10
-kubectl get gateway,f5-big-cne-irules,netpolicy -n f5-bnk -l tenancy.f5.com/project=tenant-c
+kubectl get gateway,f5-big-cne-irules,netpolicies -n f5-bnk -l tenancy.f5.com/project=tenant-c
 labctl tenant delete tenant-c
-sleep 10
-kubectl get gateway,f5-big-cne-irules,netpolicy -n f5-bnk -l tenancy.f5.com/project=tenant-c
+sleep 15
+kubectl get gateway,f5-big-cne-irules,netpolicies -n f5-bnk -l tenancy.f5.com/project=tenant-c
 ```
 
-The second listing is empty. The controller holds a finalizer on each Run:ai project, so the BNK
-config is removed before the project is gone. There is no orphaned front door left serving a tenant
-that no longer exists.
+The second listing is empty. When the Run:ai project goes, the controller removes every BNK object
+labelled with it, and its address is held back for 15 minutes before any new tenant can get it. On
+start-up it also sweeps for tenants whose project vanished while it was down. No front door is left
+serving a tenant that no longer exists.
 
 The controller's own view of all this:
 
