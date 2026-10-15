@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lab Topology</title>
+<style>
+  :root {
+    --bg: #0b0b0b; --panel: #121212; --card: #1a1a1a; --line: #2e2e2e; --line-strong: #484848;
+    --text: #f0efe2; --mild: #bfbeb4; --muted: #818178;
+    --nv: #76b900; --bnk: #e4002b; --tenant: #2fd06a; --limit: #fda422; --picker: #6c9aff;
+    --dyn: #c58cff; --meter: #ff6742; --ctrl: #e7e600; --glue: #e0b54a;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f6f6f1; --panel: #ffffff; --card: #fbfbf8; --line: #deded6; --line-strong: #bdbdb4;
+            --text: #161616; --mild: #4a4a44; --muted: #77776f; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body { font: 14px/1.55 Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 1340px; margin: 0 auto; padding: 28px 24px 48px; }
+  header { margin-bottom: 18px; }
+  .eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+  h1 { font-size: 28px; line-height: 1.2; font-weight: 600; margin: 0; letter-spacing: -.01em; }
+  .lede { color: var(--mild); margin: 10px 0 18px; max-width: 86ch; }
+  .bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  .seg button, .ctl button { display: inline-flex; align-items: center; gap: 8px; font: 500 13px/1 inherit; font-family: inherit;
+                             color: var(--mild); background: transparent; border: 0; border-radius: 6px; padding: 9px 12px; cursor: pointer; }
+  .seg button:hover, .ctl button:hover { color: var(--text); }
+  .seg button[aria-pressed="true"] { background: var(--card); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
+  .seg button:focus-visible, .ctl button:focus-visible { outline: 2px solid var(--ctrl); outline-offset: 2px; }
+  .ctl { display: inline-flex; gap: 4px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .stage { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 20px; align-items: start; margin-top: 16px; }
+  @media (max-width: 1160px) { .stage { grid-template-columns: 1fr; } }
+  .canvas { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; overflow-x: auto; }
+  svg { display: block; width: 100%; min-width: 860px; height: auto; }
+  svg text { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--text); }
+  svg .t { font-size: 13px; font-weight: 600; }
+  svg .s { font-size: 11px; fill: var(--muted); }
+  svg .lbl { font-size: 10px; letter-spacing: .08em; fill: var(--muted); }
+  svg .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; fill: var(--mild); }
+  svg .node { fill: var(--bg); stroke: var(--line); }
+  svg .card { fill: var(--card); stroke: var(--line); transition: stroke .25s, filter .25s; }
+  svg .card.lit { stroke: var(--c); stroke-width: 2; filter: drop-shadow(0 0 8px var(--c)); }
+  svg .zone { fill: none; stroke: var(--line-strong); stroke-dasharray: 4 5; }
+  svg .base { fill: none; stroke: var(--line); stroke-width: 1.5; }
+  svg .chip { fill: var(--bg); stroke: var(--line); transition: fill .25s, stroke .25s; }
+  svg .chip.lit { fill: var(--c); stroke: var(--c); }
+  svg .chip.lit + text { fill: #0b0b0b; font-weight: 600; }
+  svg .chiptext { font-size: 10px; fill: var(--mild); }
+  .hop { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; opacity: .28; transition: opacity .25s; }
+  .hop.dash { stroke-dasharray: 6 5; }
+  .hop.active { opacity: 1; animation: march 0.6s linear infinite; stroke-dasharray: 8 6; }
+  .hop.done { opacity: .9; }
+  @keyframes march { to { stroke-dashoffset: -14; } }
+  .packet { pointer-events: none; }
+  .packet circle.core { fill: #fff; }
+  .card-hit { cursor: pointer; fill: transparent; }
+  aside { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+  aside .eyebrow { display: flex; align-items: center; gap: 8px; }
+  aside h2 { font-size: 18px; font-weight: 600; margin: 0 0 6px; }
+  aside p.what { color: var(--mild); margin: 0 0 16px; font-size: 13px; }
+  ol.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; counter-reset: s; }
+  ol.steps li { display: grid; grid-template-columns: 24px 1fr; gap: 10px; font-size: 13px; line-height: 1.5; counter-increment: s;
+                padding: 8px; border-radius: 6px; cursor: pointer; color: var(--mild); transition: background .2s, color .2s; }
+  ol.steps li:hover { background: var(--card); }
+  ol.steps li.on { background: var(--card); color: var(--text); box-shadow: inset 2px 0 0 var(--flow-color); }
+  ol.steps li::before { content: counter(s); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+                        font-size: 11px; font-weight: 700; color: #0b0b0b; background: var(--flow-color); margin-top: 1px; opacity: .55; }
+  ol.steps li.on::before, ol.steps li.done::before { opacity: 1; }
+  .detail { margin-top: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font-size: 13px; color: var(--mild); min-height: 44px; }
+  .detail b { color: var(--text); }
+  code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+  @media (max-width: 1000px) { .grid2 { grid-template-columns: 1fr; } }
+  section.card2 { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+  section.card2 h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.k { color: var(--mild); white-space: nowrap; }
+  td .m { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  @media (prefers-reduced-motion: reduce) { .hop.active { animation: none; } }
+  .vision { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 4px 0 18px; }
+  .vcard { min-width: 0; overflow-wrap: anywhere; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 6px;
+           border-top: 3px solid var(--vc); text-align: left; font: inherit; color: inherit; cursor: pointer; }
+  .vcard:hover { border-color: var(--line-strong); border-top-color: var(--vc); }
+  .vcard:focus-visible { outline: 2px solid var(--ctrl); outline-offset: 2px; }
+  .vcard .k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+  .vcard .k b { font-weight: 600; color: var(--vc); }
+  .vcard .h { font-size: 14px; font-weight: 600; line-height: 1.3; }
+  .vcard .p { font-size: 12.5px; color: var(--mild); line-height: 1.45; }
+  .vcard .proof { font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+  .vcard.next { cursor: default; opacity: .78; border-top-style: dashed; }
+  h3.band { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 500; margin: 18px 0 8px; }
+
+</style>
+</head>
+<body>
+<main>
+<header>
+  <p class="eyebrow">F5 BIG-IP Next for Kubernetes 2.4 · open-source NVIDIA Run:ai</p>
+  <h1>Lab topology</h1>
+  <p class="lede">A tenant is defined once, as a Run:ai project. A small open-source controller reads it and builds that tenant's
+    BNK front door: a Gateway with its own address, a rate limit sized from the project's GPU quota, an Endpoint Picker and token
+    metering. Solid lines are inference traffic (data plane), dashed lines are configuration (control plane). Pick a flow to watch
+    it travel, or click any box to see what it does.</p>
+  <h3 class="band">The brief, shown live · click a card to play it</h3>
+  <div class="vision" id="vision">
+    <button class="vcard" data-go="define" style="--vc:var(--ctrl)"><span class="k">W1 · Santosh <b>shown</b></span>
+      <span class="h">A tenant is defined once, in Run:ai, and exists in BNK</span>
+      <span class="p">Create a project in the Run:ai UI or API. Its BNK Gateway, route, picker and limit appear on their own.</span>
+      <span class="proof">project Ready → Gateway Programmed, ~30 s</span></button>
+    <button class="vcard" data-go="limit" style="--vc:var(--limit)"><span class="k">Isolation · Santosh <b>shown</b></span>
+      <span class="h">Each tenant keeps its share of the GPU estate</span>
+      <span class="p">The limit comes from the project's GPU quota. Excess is refused at BNK, before any GPU.</span>
+      <span class="proof">0.5 GPU → 10 req/s · 74% refused · neighbour 0%</span></button>
+    <button class="vcard" data-go="meter" style="--vc:var(--meter)"><span class="k">W2 · A · B · D <b>shown</b></span>
+      <span class="h">Tokens per project, department and GPU</span>
+      <span class="p">Metered at the BNK edge from each answer's usage, reported against the Run:ai project and rolled up per department.</span>
+      <span class="proof">tenant-a 12,470 tokens = ledger</span></button>
+    <button class="vcard" data-go="chat" style="--vc:var(--picker)"><span class="k">W4 · Workload map <b>shown</b></span>
+      <span class="h">One tenant, two planes</span>
+      <span class="p">Run:ai places each model on a GPU fraction; BNK's Endpoint Picker chooses the replica. Grafana shows both side by side.</span>
+      <span class="proof">runai-scheduler · gpu-fraction 0.5 · F5EPP</span></button>
+    <button class="vcard" data-go="dynamo" style="--vc:var(--dyn)"><span class="k">NVIDIA Dynamo <b>shown</b></span>
+      <span class="h">Dynamo on Run:ai, behind BNK</span>
+      <span class="p">Dynamo's frontend and KV router with Mocker workers on Run:ai GPU fractions, fronted like any tenant.</span>
+      <span class="proof">shared prefix 8/8 one worker · spread 8/8</span></button>
+    <button class="vcard" data-go="hijack" style="--vc:var(--bnk)"><span class="k">Tenant boundary <b>shown</b></span>
+      <span class="h">No tenant can publish behind another's door</span>
+      <span class="p">Each Gateway admits routes only from its own Run:ai project namespace.</span>
+      <span class="proof">Accepted=False · NotAllowedByListeners</span></button>
+    <button class="vcard" data-go="delete" style="--vc:var(--glue)"><span class="k">Lifecycle <b>shown</b></span>
+      <span class="h">Delete the project, BNK forgets it</span>
+      <span class="p">Every BNK object for the project is removed; its address is held before reuse.</span>
+      <span class="proof">controller is read-only on Run:ai</span></button>
+    <div class="vcard next" style="--vc:var(--muted)"><span class="k">W3 · W5 · E <b>next</b></span>
+      <span class="h">Helm chart, validation matrix, GTC recording, upstream</span>
+      <span class="p">Package the controller as a Helm chart, publish it under Apache 2.0, open the Run:ai docs PR and issue, record the 12-minute demo.</span></div>
+  </div>
+  <div class="bar">
+    <div class="seg" role="group" aria-label="Choose a flow">
+      <button type="button" data-flow="define"><span class="dot" style="background:var(--ctrl)"></span>Define a tenant</button>
+      <button type="button" data-flow="chat"><span class="dot" style="background:var(--tenant)"></span>Chat to a tenant</button>
+      <button type="button" data-flow="limit"><span class="dot" style="background:var(--limit)"></span>Over its share</button>
+      <button type="button" data-flow="hijack"><span class="dot" style="background:var(--bnk)"></span>Cross-tenant route</button>
+      <button type="button" data-flow="dynamo"><span class="dot" style="background:var(--dyn)"></span>Dynamo</button>
+      <button type="button" data-flow="meter"><span class="dot" style="background:var(--meter)"></span>Token metering</button>
+      <button type="button" data-flow="delete"><span class="dot" style="background:var(--glue)"></span>Delete a tenant</button>
+    </div>
+    <div class="ctl" role="group" aria-label="Playback">
+      <button type="button" id="play" aria-label="Pause">❚❚ Pause</button>
+      <button type="button" id="prev" aria-label="Previous step">‹ Step</button>
+      <button type="button" id="next" aria-label="Next step">Step ›</button>
+    </div>
+  </div>
+</header>
+
+<div class="stage">
+<div class="canvas">
+<svg id="topo" viewBox="0 0 1220 640" role="img" aria-label="Lab topology diagram with animated flows">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,1 L9,5 L0,9 z" fill="context-stroke"/>
+    </marker>
+    <filter id="glow" x="-200%" y="-200%" width="500%" height="500%"><feGaussianBlur stdDeviation="5"/></filter>
+  </defs>
+
+  <rect class="zone" x="200" y="24" width="1004" height="602" rx="12"/>
+  <text class="lbl" x="218" y="44">KUBERNETES 1.30 CLUSTER · FOUR VMS · INSTRUQT SANDBOX</text>
+
+  <!-- people -->
+  <rect class="card" id="n-admin" x="20" y="70" width="160" height="56" rx="8"/>
+  <text class="t" x="36" y="94">Run:ai admin</text>
+  <text class="s" x="36" y="112">UI · API · labctl</text>
+  <rect class="card" id="n-client" x="20" y="318" width="160" height="56" rx="8"/>
+  <text class="t" x="36" y="342">Client app</text>
+  <text class="s" x="36" y="360">any OpenAI SDK</text>
+
+  <!-- node: runai -->
+  <rect class="node" x="216" y="58" width="300" height="196" rx="10"/>
+  <text class="lbl" x="232" y="78">NODE · RUNAI</text><text class="s" x="318" y="78">Run:ai control plane</text>
+  <rect class="card" id="n-cp" x="232" y="92" width="268" height="62" rx="6" style="stroke:var(--nv);stroke-width:1.5"/>
+  <text class="t" x="246" y="114">Run:ai control plane</text>
+  <text class="s" x="246" y="131">UI · REST API · Keycloak · Postgres · NATS</text>
+  <text class="mono" x="246" y="146">https://runai.lab</text>
+  <rect class="card" id="n-agent" x="232" y="166" width="268" height="62" rx="6"/>
+  <text class="t" x="246" y="188">Run:ai cluster services</text>
+  <text class="s" x="246" y="205">agent · project + queue controllers</text>
+  <text class="mono" x="246" y="220">writes kai.resources Project</text>
+
+  <!-- node: control -->
+  <rect class="node" x="216" y="270" width="300" height="346" rx="10"/>
+  <text class="lbl" x="232" y="290">NODE · CONTROL</text><text class="s" x="346" y="290">Kubernetes + the glue</text>
+  <rect class="card" id="n-ctrl" x="232" y="304" width="268" height="62" rx="6" style="stroke:var(--glue);stroke-width:1.5"/>
+  <text class="t" x="246" y="326">Tenancy controller</text>
+  <text class="s" x="246" y="343">open source · reads projects, writes BNK</text>
+  <text class="mono" x="246" y="358">rate = 20 req/s × GPU quota</text>
+  <rect class="card" id="n-meter" x="232" y="378" width="268" height="62" rx="6"/>
+  <text class="t" x="246" y="400">Token meter</text>
+  <text class="s" x="246" y="417">tokens per project and department</text>
+  <text class="mono" x="246" y="432">10.1.10.11:5514 · :9100</text>
+  <rect class="card" id="n-graf" x="232" y="452" width="268" height="52" rx="6"/>
+  <text class="t" x="246" y="474">Prometheus + Grafana</text>
+  <text class="s" x="246" y="491">one tenant, two planes</text>
+  <rect class="card" id="n-ledger" x="232" y="516" width="268" height="52" rx="6"/>
+  <text class="t" x="246" y="538">Usage ledger</text>
+  <text class="s" x="246" y="555">ConfigMap + events on each Run:ai project</text>
+
+  <!-- node: dpu -->
+  <rect class="node" x="560" y="58" width="300" height="430" rx="10"/>
+  <text class="lbl" x="576" y="78">NODE · DPU</text><text class="s" x="652" y="78">BNK data plane · simulated BlueField-3</text>
+  <rect class="card" id="n-cne" x="576" y="92" width="268" height="52" rx="6"/>
+  <text class="t" x="590" y="114">BNK controller</text>
+  <text class="s" x="590" y="131">Gateway API → TMM config</text>
+  <rect class="card" id="n-tmm" x="576" y="156" width="268" height="200" rx="6" style="stroke:var(--bnk);stroke-width:1.5"/>
+  <text class="t" x="590" y="178">BNK TMM</text><text class="s" x="660" y="178">one VIP per Run:ai project</text>
+  <text class="mono" x="590" y="198">tenant-a 172.16.201.110:8000</text>
+  <text class="mono" x="590" y="214">tenant-b 172.16.201.111:8000</text>
+  <text class="mono" x="590" y="230">dynamo   172.16.201.112:8000</text>
+  <g id="chips">
+    <rect class="chip" id="c-route" x="588" y="246" width="78" height="20" rx="4"/><text class="chiptext" x="627" y="260" text-anchor="middle">own route</text>
+    <rect class="chip" id="c-limit" x="672" y="246" width="78" height="20" rx="4"/><text class="chiptext" x="711" y="260" text-anchor="middle">rate limit</text>
+    <rect class="chip" id="c-pick" x="756" y="246" width="78" height="20" rx="4"/><text class="chiptext" x="795" y="260" text-anchor="middle">picker</text>
+    <rect class="chip" id="c-tag" x="588" y="272" width="78" height="20" rx="4"/><text class="chiptext" x="627" y="286" text-anchor="middle">tenant tag</text>
+    <rect class="chip" id="c-meter" x="672" y="272" width="78" height="20" rx="4"/><text class="chiptext" x="711" y="286" text-anchor="middle">metering</text>
+  </g>
+  <text class="s" x="590" y="312">per-tenant iRule + NetPolicy</text>
+  <text class="mono" x="590" y="330">ext 10.1.10.201 · int 10.1.20.201</text>
+  <rect class="card" id="n-epp" x="576" y="368" width="268" height="52" rx="6"/>
+  <text class="t" x="590" y="390">F5 Endpoint Picker</text>
+  <text class="s" x="590" y="407">one per tenant · queue + prefix cache</text>
+  <rect class="card" id="n-dssm" x="576" y="432" width="268" height="44" rx="6"/>
+  <text class="t" x="590" y="452">BNK state store</text>
+  <text class="s" x="590" y="467">DSSM · licence · AFM</text>
+
+  <!-- node: gpu -->
+  <rect class="node" x="904" y="58" width="290" height="430" rx="10"/>
+  <text class="lbl" x="920" y="78">NODE · GPU</text><text class="s" x="990" y="78">4 × A10, simulated</text>
+  <rect class="card" id="n-sched" x="920" y="92" width="258" height="52" rx="6" style="stroke:var(--nv);stroke-width:1.5"/>
+  <text class="t" x="934" y="114">Run:ai scheduler</text>
+  <text class="s" x="934" y="131">quota · priority · GPU fractions</text>
+  <rect class="card" id="n-a" x="920" y="156" width="258" height="52" rx="6"/>
+  <text class="t" x="934" y="178">tenant-a models</text>
+  <text class="s" x="934" y="195">2 × vLLM sim · 0.5 GPU each</text>
+  <rect class="card" id="n-b" x="920" y="220" width="258" height="52" rx="6"/>
+  <text class="t" x="934" y="242">tenant-b model</text>
+  <text class="s" x="934" y="259">vLLM sim · 0.5 GPU</text>
+  <rect class="card" id="n-dfront" x="920" y="284" width="258" height="52" rx="6" style="stroke:var(--dyn)"/>
+  <text class="t" x="934" y="306">Dynamo frontend</text>
+  <text class="s" x="934" y="323">OpenAI API · KV-aware router</text>
+  <rect class="card" id="n-dwork" x="920" y="348" width="258" height="52" rx="6" style="stroke:var(--dyn)"/>
+  <text class="t" x="934" y="370">Dynamo Mocker workers</text>
+  <text class="s" x="934" y="387">2 × decode · 0.5 GPU each</text>
+  <rect class="card" id="n-dinfra" x="920" y="412" width="258" height="44" rx="6"/>
+  <text class="t" x="934" y="432">etcd + NATS</text>
+  <text class="s" x="934" y="447">discovery · KV events</text>
+
+  <!-- data path networks -->
+  <rect class="node" x="560" y="504" width="634" height="112" rx="10"/>
+  <text class="lbl" x="576" y="524">DATA-PATH NETWORKS · GRE TUNNELS STAND IN FOR THE DPU LINKS</text>
+  <text class="t" x="576" y="550" style="font-size:12px">external-net</text>
+  <text class="mono" x="576" y="568">10.1.10.0/24 · client → VIP</text>
+  <text class="t" x="790" y="550" style="font-size:12px">internal-net</text>
+  <text class="mono" x="790" y="568">10.1.20.0/24 · TMM → pods</text>
+  <text class="t" x="1000" y="550" style="font-size:12px">client leg</text>
+  <text class="mono" x="1000" y="568">control = 10.1.10.11</text>
+  <text class="s" x="576" y="596">VIPs 172.16.201.0/24 are routed via TMM's external self-IP 10.1.10.201</text>
+
+  <!-- plane key -->
+  <g transform="translate(20,430)">
+    <text class="lbl" x="0" y="0">PLANES</text>
+    <line x1="0" y1="18" x2="34" y2="18" stroke="var(--mild)" stroke-width="2.5"/>
+    <text class="s" x="42" y="22">data · inference traffic</text>
+    <line x1="0" y1="38" x2="34" y2="38" stroke="var(--mild)" stroke-width="2.5" stroke-dasharray="6 5"/>
+    <text class="s" x="42" y="42">control · configuration</text>
+    <text class="s" x="0" y="66">Tenants are defined in Run:ai.</text>
+    <text class="s" x="0" y="82">Nobody configures BNK by hand.</text>
+  </g>
+
+  <!-- physical links -->
+  <path class="base" d="M180,98 H232"/>
+  <path class="base" d="M180,346 H200 V230 H576"/>
+  <path class="base" d="M844,250 H920"/>
+  <path class="base" d="M366,228 V304"/>
+  <path class="base" d="M500,334 H540 V118 H576"/>
+
+  <g id="hops"></g>
+  <g id="packets"></g>
+  <g id="hits"></g>
+</svg>
+</div>
+
+<aside aria-live="polite">
+  <p class="eyebrow"><span class="dot" id="pdot"></span><span id="plabel">Flow</span></p>
+  <h2 id="ptitle"></h2>
+  <p class="what" id="pwhat"></p>
+  <ol class="steps" id="psteps"></ol>
+  <div class="detail" id="detail">Click any box in the diagram to see what it is.</div>
+</aside>
+</div>
+
+<div class="grid2">
+<section class="card2">
+  <h2>Addresses and names</h2>
+  <table>
+    <tbody>
+      <tr><td class="k">Run:ai UI and API</td><td><span class="m">https://runai.lab</span> on the runai node, behind ingress-nginx. Sign in as <code>admin@acme.lab</code>.</td></tr>
+      <tr><td class="k">Tenant VIPs</td><td><span class="m">172.16.201.110–149 :8000</span>, one per Run:ai project, on TMM. A released address is held 15 minutes before reuse.</td></tr>
+      <tr><td class="k">BNK objects</td><td>Gateway <span class="m">&lt;project&gt;</span>, iRule <span class="m">&lt;project&gt;-limit</span> and NetPolicy in <span class="m">f5-bnk</span>; HTTPRoute, InferencePool and F5EPP in <span class="m">runai-&lt;project&gt;</span>. All labelled <span class="m">tenancy.f5.com/project</span>.</td></tr>
+      <tr><td class="k">Scheduling</td><td>Pods carry <span class="m">runai/queue: &lt;project&gt;</span>, <span class="m">schedulerName: runai-scheduler</span> and <span class="m">gpu-fraction</span>.</td></tr>
+      <tr><td class="k">Token meter</td><td><span class="m">10.1.10.11:5514</span>, reachable from TMM. Only TMM's self-IP may connect, with a shared token.</td></tr>
+      <tr><td class="k">Grafana</td><td><span class="m">control :3000</span>, dashboard <span class="m">one-tenant-two-planes</span>.</td></tr>
+    </tbody>
+  </table>
+</section>
+<section class="card2">
+  <h2>What is real and what stands in</h2>
+  <table>
+    <thead><tr><th>Real</th><th>Stand-in for this sandbox</th></tr></thead>
+    <tbody>
+      <tr><td>BNK 2.4: TMM, Gateway API, InferencePool, F5 Endpoint Picker, iRules, NetPolicy</td><td>The DPU is a VM with GRE tunnels to the GPU node. In production TMM runs on BlueField-3.</td></tr>
+      <tr><td>Open-source NVIDIA Run:ai: control plane, UI, API, scheduler, projects and quotas</td><td>The GPUs come from NVIDIA's fake-gpu-operator: real to the scheduler, no silicon.</td></tr>
+      <tr><td>NVIDIA Dynamo frontend and KV-aware router</td><td>Dynamo's Mocker engine replaces real inference; vLLM simulators stand in for vLLM.</td></tr>
+      <tr><td>Every rate limit, 429, route decision and token count</td><td>Model answers are filler text from the simulators.</td></tr>
+    </tbody>
+  </table>
+</section>
+</div>
+</main>
+
+<script>
+// Each hop: the path a packet travels, the boxes it lights, the TMM chips it lights, and its step text.
+// Every step below was observed on a live sandbox.
+const FLOWS = {
+  define: { label: "Control plane", color: "--ctrl", t: "Define a tenant", w: "A Run:ai admin creates a project. BNK builds that tenant's front door with nobody touching BNK.", hops: [
+    { d: "M180,98 H232", dash: true, lit: ["n-admin", "n-cp"], s: "The admin creates project <code>tenant-a</code> with a 2-GPU quota, in the Run:ai UI or with <code>POST /api/v1/org-unit/projects</code>." },
+    { d: "M366,154 V166", dash: true, lit: ["n-agent"], s: "The Run:ai agent writes the cluster-side <code>kai.resources</code> Project and creates namespace <code>runai-tenant-a</code>. Only Run:ai may write projects; its webhook refuses everyone else." },
+    { d: "M366,228 V304", dash: true, lit: ["n-ctrl"], s: "The tenancy controller sees the project go <b>Ready</b> and reads its quota and rank. It never writes back to Run:ai." },
+    { d: "M500,334 H540 V118 H576", dash: true, lit: ["n-cne"], s: "It applies the tenant's BNK objects: Gateway, HTTPRoute, InferencePool, F5EPP, rate-limit iRule (40 req/s for 2 GPUs) and NetPolicy." },
+    { d: "M710,144 V156", dash: true, lit: ["n-tmm"], chips: ["c-route", "c-limit", "c-tag", "c-meter"], s: "BNK programs TMM. Gateway <code>tenant-a</code> is <b>Programmed</b> on 172.16.201.110." },
+    { d: "M710,356 V368", dash: true, lit: ["n-epp"], chips: ["c-pick"], s: "BNK starts tenant-a's own Endpoint Picker in its namespace." },
+  ]},
+  chat: { label: "Data plane", color: "--tenant", t: "Chat to a tenant", w: "An app calls tenant-a's address. Run:ai placed the model; BNK picks the replica.", hops: [
+    { d: "M180,346 H200 V230 H576", lit: ["n-client", "n-tmm"], s: "The app sends <code>POST /v1/chat/completions</code> to tenant-a's VIP, 172.16.201.110:8000." },
+    { d: "M710,250 V250", lit: ["n-tmm"], chips: ["c-route", "c-limit"], s: "TMM matches tenant-a's route and checks its rate limit: under 40 req/s, so it passes." },
+    { d: "M710,356 V368", lit: ["n-epp"], chips: ["c-pick"], s: "TMM asks tenant-a's Endpoint Picker which replica should take it, by queue depth and prefix cache." },
+    { d: "M844,250 H900 V182 H920", lit: ["n-a"], s: "The request reaches the chosen replica, a vLLM server that Run:ai placed on half a GPU." },
+    { d: "M920,196 H880 V290 H844", lit: ["n-tmm"], chips: ["c-tag", "c-meter"], back: true, s: "On the way back the iRule adds <code>X-BNK-Tenant: tenant-a</code> and parks the token counts." },
+    { d: "M576,240 H200 V360 H180", lit: ["n-client"], back: true, s: "The app gets HTTP 200 with the answer and its usage." },
+  ]},
+  limit: { label: "Data plane", color: "--limit", t: "Over its share", w: "tenant-b has half a GPU, so 10 req/s. At 40 req/s, BNK refuses the excess before any GPU sees it.", hops: [
+    { d: "M180,346 H200 V230 H576", lit: ["n-client", "n-tmm"], s: "A burst of 40 req/s hits tenant-b's VIP, 172.16.201.111." },
+    { d: "M710,250 V250", lit: ["n-tmm"], chips: ["c-limit"], s: "The iRule counts tenant-b's requests per second. Above 10, it answers <b>429</b> itself with <code>tenant/rate-limited</code>." },
+    { d: "M576,240 H200 V360 H180", lit: ["n-client"], back: true, s: "Live result: 10 req/s served, 30 req/s refused (74%). tenant-a, at steady load at the same time, saw 0% refused." },
+    { d: "M844,250 H900 V246 H920", lit: ["n-b"], s: "Only the 10 req/s inside tenant-b's share ever reach its model. Each tenant keeps its share of the GPU estate." },
+  ]},
+  hijack: { label: "Control plane", color: "--bnk", t: "Cross-tenant route", w: "tenant-b tries to publish a route behind tenant-a's front door.", hops: [
+    { d: "M180,98 H232", dash: true, lit: ["n-admin"], s: "Someone in tenant-b's namespace creates an HTTPRoute that names Gateway <code>tenant-a</code> as its parent." },
+    { d: "M500,334 H540 V118 H576", dash: true, lit: ["n-cne"], s: "BNK checks the Gateway's listener: it admits routes only from namespace <code>runai-tenant-a</code>." },
+    { d: "M710,144 V156", dash: true, lit: ["n-tmm"], chips: ["c-route"], s: "The route is <b>Accepted=False, NotAllowedByListeners</b>. TMM never serves it." },
+  ]},
+  dynamo: { label: "Data plane", color: "--dyn", t: "Dynamo", w: "A Run:ai project running NVIDIA Dynamo. BNK fronts it; Dynamo's own router picks the worker.", hops: [
+    { d: "M180,346 H200 V230 H576", lit: ["n-client", "n-tmm"], s: "The app calls the <code>dynamo</code> project's VIP, 172.16.201.112." },
+    { d: "M710,250 V250", lit: ["n-tmm"], chips: ["c-route", "c-limit", "c-tag"], s: "Same front door as any tenant: own route, rate limit, tenant tag, metering." },
+    { d: "M844,250 H900 V310 H920", lit: ["n-dfront"], s: "TMM sends the request to the Dynamo frontend." },
+    { d: "M1049,336 V348", lit: ["n-dwork"], s: "Dynamo's KV router picks the worker. Live: one shared prompt went to the same worker 8 of 8 times; 16 different prompts at once split 8 and 8." },
+    { d: "M1049,400 V412", lit: ["n-dinfra"], s: "Workers announce themselves through etcd and publish KV-cache events over NATS, which the router reads." },
+    { d: "M920,310 H880 V290 H844", lit: ["n-tmm"], back: true, chips: ["c-tag", "c-meter"], s: "The answer returns through TMM with <code>X-BNK-Tenant: dynamo</code>." },
+  ]},
+  meter: { label: "Data path", color: "--meter", t: "Token metering", w: "How each project's token count leaves TMM and reaches Grafana and Run:ai.", hops: [
+    { d: "M710,272 V272", lit: ["n-tmm"], chips: ["c-meter"], s: "On every response the iRule reads <code>usage</code> from the model's answer and parks one line in a TMM table." },
+    { d: "M500,409 H540 V300 H576", dash: true, lit: ["n-meter", "n-tmm"], s: "Every 5 seconds the meter calls each tenant's <code>/bnk/flush</code> with a shared token." },
+    { d: "M576,320 H540 V420 H500", lit: ["n-meter"], s: "TMM sends the parked lines over TCP from 10.1.10.201 to 10.1.10.11:5514. The meter refuses any other sender." },
+    { d: "M366,440 V452", lit: ["n-graf"], s: "Prometheus scrapes <code>bnk_tokens_total{project, department, model}</code>; Grafana shows tokens and tokens per GPU per project." },
+    { d: "M366,504 V516", lit: ["n-ledger"], s: "Every 30 seconds totals go to the usage ledger, rolled up per department, with a <code>TokensMetered</code> event on the Run:ai project." },
+  ]},
+  delete: { label: "Control plane", color: "--glue", t: "Delete a tenant", w: "Remove the project in Run:ai. BNK forgets it.", hops: [
+    { d: "M180,98 H232", dash: true, lit: ["n-admin", "n-cp"], s: "The admin deletes the project in Run:ai." },
+    { d: "M366,154 V166", dash: true, lit: ["n-agent"], s: "Run:ai removes the cluster-side Project." },
+    { d: "M366,228 V304", dash: true, lit: ["n-ctrl"], s: "The controller sees it gone and deletes every BNK object labelled with the project, including the copied registry secret." },
+    { d: "M500,334 H540 V118 H576", dash: true, lit: ["n-cne", "n-tmm"], s: "BNK withdraws the Gateway. The VIP is held 15 minutes before any new tenant may get it, so stale clients never reach someone else." },
+  ]},
+};
+const INFO = {
+  "n-admin": "<b>Run:ai admin.</b> Works in the Run:ai UI, the REST API or <code>labctl</code>, which calls the same API. The only place a tenant is defined.",
+  "n-client": "<b>Client app.</b> Anything that speaks the OpenAI API, or <code>labctl chat</code> and <code>labctl load</code> in the terminal. It talks to a tenant's BNK VIP directly.",
+  "n-cp": "<b>Run:ai control plane.</b> The open-source NVIDIA Run:ai backend: UI, REST API, Keycloak identity, Postgres, NATS and about 30 services. Images built from source and published once.",
+  "n-agent": "<b>Run:ai cluster services.</b> The agent, project controller and queue controller. They turn API objects into <code>kai.resources</code> Projects, namespaces and scheduling queues. Run:ai's admission webhook lets only these services write projects.",
+  "n-ctrl": "<b>Tenancy controller.</b> The new open-source piece, Apache 2.0. Watches Run:ai projects and writes one BNK tenant per project. Read-only on Run:ai; it owns only objects it created.",
+  "n-meter": "<b>Token meter.</b> Pulls parked usage lines from each tenant's iRule, exports Prometheus counters and keeps per-project and per-department totals.",
+  "n-graf": "<b>Prometheus + Grafana.</b> The 'One tenant, two planes' board: Run:ai's GPU quota and allocation next to BNK's requests, 429s, tokens and tokens per GPU.",
+  "n-ledger": "<b>Usage ledger.</b> ConfigMap <code>bnk-runai-usage</code> with durable totals, plus <code>TokensMetered</code> events attached to each Run:ai project and department.",
+  "n-cne": "<b>BNK controller.</b> F5's controller (<code>f5-cne-controller</code>): turns Gateway API, GAIE and F5 resources into TMM configuration.",
+  "n-tmm": "<b>BNK TMM.</b> BIG-IP Next's data plane. One Gateway and VIP per Run:ai project, each with its own route, rate limit, tenant tag and token metering.",
+  "n-epp": "<b>F5 Endpoint Picker.</b> One per tenant, in the tenant's namespace. TMM asks it which replica should take each request, from queue depth and prefix-cache state.",
+  "n-dssm": "<b>BNK state store.</b> DSSM keeps TMM's shared state; the licence and AFM run beside it.",
+  "n-sched": "<b>Run:ai scheduler.</b> Places every workload by project quota, priority and GPU fractions. Two tenants can share one GPU at 0.5 each.",
+  "n-a": "<b>tenant-a models.</b> vLLM simulators with real vLLM metrics, two replicas at half a GPU each, so the Endpoint Picker has a choice.",
+  "n-b": "<b>tenant-b model.</b> One vLLM simulator at half a GPU, the same GPU as one of tenant-a's.",
+  "n-dfront": "<b>Dynamo frontend.</b> NVIDIA Dynamo's real OpenAI-compatible frontend with its KV-aware router, no GPU.",
+  "n-dwork": "<b>Dynamo Mocker workers.</b> Dynamo's own GPU-free engine. Behaves like a real worker toward the router, including KV-cache events. Half a GPU each from Run:ai.",
+  "n-dinfra": "<b>etcd + NATS.</b> Dynamo's discovery (etcd) and event bus (NATS), one small pod each.",
+};
+const NS = "http://www.w3.org/2000/svg";
+const hopsG = document.getElementById("hops"), packetsG = document.getElementById("packets");
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let flow = "define", step = 0, playing = true, timer = null, anim = null;
+
+function el(tag, attrs) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+function color() { return `var(${FLOWS[flow].color})`; }
+function clearLit() { document.querySelectorAll(".lit").forEach(e => e.classList.remove("lit")); }
+function draw() {
+  hopsG.innerHTML = ""; packetsG.innerHTML = "";
+  FLOWS[flow].hops.forEach((h, i) => {
+    if (h.d.match(/^M(\d+),(\d+) V\2$/)) return;   // a step inside TMM: no line, the chips light instead
+    hopsG.appendChild(el("path", { d: h.d, class: "hop" + (h.dash ? " dash" : ""), stroke: color(), "marker-end": "url(#arrow)", "data-i": i }));
+  });
+}
+function panel() {
+  const f = FLOWS[flow];
+  document.getElementById("pdot").style.background = color();
+  document.getElementById("plabel").textContent = f.label;
+  document.getElementById("ptitle").textContent = f.t;
+  document.getElementById("pwhat").textContent = f.w;
+  const ol = document.getElementById("psteps");
+  ol.style.setProperty("--flow-color", color());
+  ol.innerHTML = f.hops.map((h, i) => `<li data-i="${i}"><span>${h.s}</span></li>`).join("");
+  ol.querySelectorAll("li").forEach(li => li.addEventListener("click", () => { pause(); go(+li.dataset.i); }));
+}
+function go(i) {
+  const hops = FLOWS[flow].hops;
+  step = (i + hops.length) % hops.length;
+  const h = hops[step];
+  clearLit();
+  document.documentElement.style.setProperty("--c", color());
+  (h.lit || []).forEach(id => document.getElementById(id)?.classList.add("lit"));
+  (h.chips || []).forEach(id => document.getElementById(id)?.classList.add("lit"));
+  hopsG.querySelectorAll(".hop").forEach(p => {
+    const n = +p.dataset.i;
+    p.classList.toggle("active", n === step);
+    p.classList.toggle("done", n < step);
+  });
+  document.querySelectorAll("#psteps li").forEach((li, n) => { li.classList.toggle("on", n === step); li.classList.toggle("done", n < step); });
+  firePacket(h);
+}
+function firePacket(h) {
+  if (anim) cancelAnimationFrame(anim);
+  packetsG.innerHTML = "";
+  const path = hopsG.querySelector(`.hop[data-i="${step}"]`);
+  if (!path || reduce) return;
+  const len = path.getTotalLength();
+  const g = el("g", { class: "packet" });
+  if (h.dash) {
+    g.appendChild(el("circle", { r: 7, fill: "none", stroke: color(), "stroke-width": 2.5 }));
+  } else {
+    g.appendChild(el("circle", { r: 9, fill: color(), filter: "url(#glow)", opacity: .9 }));
+    g.appendChild(el("circle", { r: 4.5, class: "core" }));
+  }
+  packetsG.appendChild(g);
+  const dur = Math.max(700, len * 3.2), t0 = performance.now();
+  (function tick(now) {
+    const k = Math.min(1, (now - t0) / dur);
+    const e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+    const pt = path.getPointAtLength(e * len);
+    g.setAttribute("transform", `translate(${pt.x},${pt.y})`);
+    if (k < 1) anim = requestAnimationFrame(tick);
+  })(t0);
+}
+function loop() {
+  clearTimeout(timer);
+  if (!playing) return;
+  timer = setTimeout(() => { go(step + 1); loop(); }, 2600);
+}
+function pause() { playing = false; clearTimeout(timer); document.getElementById("play").textContent = "▶ Play"; }
+function play() { playing = true; document.getElementById("play").textContent = "❚❚ Pause"; loop(); }
+function select(f) {
+  flow = f; step = 0;
+  document.querySelectorAll(".seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.flow === f)));
+  draw(); panel(); go(0); if (playing) loop();
+}
+document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => select(b.dataset.flow)));
+document.querySelectorAll(".vcard[data-go]").forEach(c => c.addEventListener("click", () => {
+  select(c.dataset.go); document.querySelector(".stage").scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+}));
+document.getElementById("play").addEventListener("click", () => playing ? pause() : play());
+document.getElementById("next").addEventListener("click", () => { pause(); go(step + 1); });
+document.getElementById("prev").addEventListener("click", () => { pause(); go(step - 1); });
+Object.keys(INFO).forEach(id => {
+  const r = document.getElementById(id); if (!r) return;
+  const hit = el("rect", { class: "card-hit", x: r.getAttribute("x"), y: r.getAttribute("y"), width: r.getAttribute("width"), height: r.getAttribute("height"), rx: 6, tabindex: 0, role: "button", "aria-label": id.replace("n-", "") });
+  const show = () => { document.getElementById("detail").innerHTML = INFO[id]; };
+  hit.addEventListener("click", show); hit.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); show(); } });
+  document.getElementById("hits").appendChild(hit);
+});
+if (reduce) pause();
+const start = (location.hash || "").slice(1);
+select(FLOWS[start] ? start : "define");
+</script>
+</body>
+</html>

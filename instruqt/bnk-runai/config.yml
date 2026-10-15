@@ -11,6 +11,7 @@ virtualmachines:
   ports:
   - 3000   # grafana
   - 3001   # browser for the Run:ai UI (platform/browser)
+  - 3002   # interactive lab topology (platform/topology)
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
     LAB_ROOT: /root/lab

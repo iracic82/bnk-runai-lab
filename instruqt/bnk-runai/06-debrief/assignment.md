@@ -3,8 +3,7 @@ slug: debrief
 id: tvwvrxmzsupm
 type: challenge
 title: What you built, and what's next
-teaser: A recap of the integration, what in this lab is real and what is simulated,
-  and what changes on a real BlueField-3 DPU.
+teaser: A recap of the integration, what in this lab is real and what is simulated, and what changes on a real BlueField-3 DPU.
 notes:
 - type: image
   url: ../assets/notes-06.png
@@ -13,6 +12,11 @@ tabs:
   title: Terminal
   type: terminal
   hostname: control
+- title: Topology
+  type: service
+  hostname: control
+  path: /topology.html
+  port: 3002
 - id: oeesamh9bpil
   title: Grafana
   type: service
@@ -31,7 +35,7 @@ tabs:
   path: /root/lab
 difficulty: basic
 timelimit: 900
-enhanced_loading: null
+enhanced_loading:
 ---
 ![What you built](../assets/06-recap.png)
 

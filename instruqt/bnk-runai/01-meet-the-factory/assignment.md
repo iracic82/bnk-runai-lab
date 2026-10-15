@@ -3,8 +3,7 @@ slug: meet-the-factory
 id: pwzmtvaqmzpb
 type: challenge
 title: Meet the AI factory
-teaser: A real Kubernetes cluster with BNK 2.4 and open-source NVIDIA Run:ai. The
-  GPUs are simulated.
+teaser: A real Kubernetes cluster with BNK 2.4 and open-source NVIDIA Run:ai. The GPUs are simulated.
 notes:
 - type: image
   url: ../assets/notes-01-hero.png
@@ -15,6 +14,11 @@ tabs:
   title: Terminal
   type: terminal
   hostname: control
+- title: Topology
+  type: service
+  hostname: control
+  path: /topology.html
+  port: 3002
 - id: rxcn8zg0rf4u
   title: Run:ai UI
   type: service
@@ -41,7 +45,7 @@ tabs:
   hostname: dpu
 difficulty: basic
 timelimit: 1800
-enhanced_loading: null
+enhanced_loading:
 ---
 Here is the stack you are about to explore. NVIDIA's Run:ai layers are in green and grey, the F5
 layer in red, and the controller that joins them in yellow. Each layer shows the node it runs on.
@@ -53,6 +57,7 @@ Your tabs:
 | Tab | What it is |
 |---|---|
 | **Terminal** | `kubectl` and `labctl` on the control node |
+| **Topology** | the whole lab as an animated diagram: pick a flow and watch it travel, control plane and data plane |
 | **Run:ai UI** | the open-source Run:ai console, in a browser inside the lab |
 | **Grafana** | "One tenant, two planes": Run:ai's GPU view and BNK's request view side by side |
 | **Lab code** | the controller, the installers and these challenges |

@@ -38,6 +38,8 @@ step() { echo "==== $(date +%H:%M:%S) $*"; }
   kubectl -n bnk-runai-tenancy rollout status deploy/bnk-runai-meter --timeout=300s || true
   step "Prometheus + Grafana"
   bash "$LAB_ROOT/platform/observability/install.sh"
+  step "interactive lab topology"
+  bash "$LAB_ROOT/platform/topology/install.sh"
   step "browser for the Run:ai UI"
   bash "$LAB_ROOT/platform/browser/install.sh"
 } 2>&1 | tee /root/setup/lab.log
