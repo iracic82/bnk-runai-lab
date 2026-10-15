@@ -4,6 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"strconv"
+	"strings"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -27,13 +34,17 @@ type Applier struct {
 var _ reconcile.BundleApplier = (*Applier)(nil)
 
 // Apply renders and applies the tenant's objects. It is idempotent, and re-applying restores
-// anything someone changed or deleted by hand.
+// anything someone changed or deleted by hand. It never takes over an object it did not create.
 func (a *Applier) Apply(ctx context.Context, d reconcile.Desired) error {
 	vip, err := a.vipFor(ctx, d.Tenant.Project)
 	if err != nil {
 		return err
 	}
 	for _, o := range Render(a.Config, d, vip.String()) {
+		if err := a.mustOwn(ctx, o, d.Tenant.Project); err != nil {
+			return err
+		}
+		// Forcing is safe now: the object is either new or ours for this very project.
 		if err := a.Client.Patch(ctx, o, client.Apply, client.FieldOwner(FieldManager), client.ForceOwnership); err != nil {
 			return fmt.Errorf("apply %s %s/%s: %w", o.GetKind(), o.GetNamespace(), o.GetName(), err)
 		}
@@ -41,8 +52,29 @@ func (a *Applier) Apply(ctx context.Context, d reconcile.Desired) error {
 	return nil
 }
 
-// Delete removes every object labelled with the project, in any namespace. Kinds whose CRD is
-// missing are skipped, so a half-installed BNK never blocks a Run:ai project deletion.
+// mustOwn refuses objects that exist but were not created by this controller for this project,
+// so a name collision in the shared f5-bnk namespace can never hand one tenant another's config.
+func (a *Applier) mustOwn(ctx context.Context, o *unstructured.Unstructured, project string) error {
+	cur := &unstructured.Unstructured{}
+	cur.SetGroupVersionKind(o.GroupVersionKind())
+	err := a.Client.Get(ctx, client.ObjectKeyFromObject(o), cur)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get %s %s/%s: %w", o.GetKind(), o.GetNamespace(), o.GetName(), err)
+	}
+	l := cur.GetLabels()
+	if l[LabelManagedBy] != ManagedBy || l[LabelProject] != project {
+		return fmt.Errorf("%s %s/%s already exists and is not managed for Run:ai project %s; refusing to take it over",
+			o.GetKind(), o.GetNamespace(), o.GetName(), project)
+	}
+	return nil
+}
+
+// Delete removes every object labelled with the project, in any namespace, and puts the tenant's
+// VIP on hold. Kinds whose CRD is missing are skipped, so a half-installed BNK never blocks a Run:ai
+// project deletion.
 func (a *Applier) Delete(ctx context.Context, project string) error {
 	for _, gvk := range OwnedKinds {
 		list := &unstructured.UnstructuredList{}
@@ -60,39 +92,98 @@ func (a *Applier) Delete(ctx context.Context, project string) error {
 			}
 		}
 	}
-	return nil
+	return a.releaseVIP(ctx, project)
 }
 
-// vipFor keeps the address a tenant already has, otherwise takes the lowest free one in the pool.
+// VIP bookkeeping lives in one ConfigMap in the BNK namespace, updated with optimistic concurrency:
+//
+//	data["<ip>"] = "<project>"             assigned
+//	data["<ip>"] = "released:<unix-secs>"  on hold until VIPHold has passed
+//
+// A released address is not handed out again straight away, so clients still pointing at a deleted
+// tenant's VIP never land on a new tenant.
+const vipConfigMap = "bnk-runai-tenancy-vips"
+
+// VIPHold is how long a released VIP stays unassigned.
+var VIPHold = 15 * time.Minute
+
 func (a *Applier) vipFor(ctx context.Context, project string) (netip.Addr, error) {
-	list := &unstructured.UnstructuredList{}
-	list.SetGroupVersionKind(GatewayGVK.GroupVersion().WithKind("GatewayList"))
-	if err := a.Client.List(ctx, list, client.InNamespace(a.Config.Namespace),
-		client.MatchingLabels{LabelManagedBy: ManagedBy}); err != nil {
-		return netip.Addr{}, fmt.Errorf("list tenant gateways: %w", err)
-	}
-	used := map[netip.Addr]bool{}
-	for _, gw := range list.Items {
-		addrs, _, _ := unstructured.NestedSlice(gw.Object, "spec", "addresses")
-		for _, raw := range addrs {
-			m, _ := raw.(map[string]any)
-			v, _ := m["value"].(string)
-			ip, err := netip.ParseAddr(v)
-			if err != nil {
+	var out netip.Addr
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		cm, err := a.vipMap(ctx)
+		if err != nil {
+			return err
+		}
+		for k, v := range cm.Data {
+			if v == project {
+				ip, err := netip.ParseAddr(k)
+				if err == nil {
+					out = ip
+					return nil
+				}
+			}
+		}
+		now := time.Now()
+		for _, ip := range a.VIPs {
+			v, taken := cm.Data[ip.String()]
+			if taken && !releasedLongAgo(v, now) {
 				continue
 			}
-			if gw.GetLabels()[LabelProject] == project {
-				return ip, nil
+			if cm.Data == nil {
+				cm.Data = map[string]string{}
 			}
-			used[ip] = true
+			cm.Data[ip.String()] = project
+			out = ip
+			return a.Client.Update(ctx, cm)
 		}
-	}
-	for _, ip := range a.VIPs {
-		if !used[ip] {
-			return ip, nil
+		return fmt.Errorf("no free tenant VIP left in the pool (%d addresses, released ones are held for %s)", len(a.VIPs), VIPHold)
+	})
+	return out, err
+}
+
+func (a *Applier) releaseVIP(ctx context.Context, project string) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		cm, err := a.vipMap(ctx)
+		if err != nil {
+			return err
 		}
+		changed := false
+		for k, v := range cm.Data {
+			if v == project {
+				cm.Data[k] = fmt.Sprintf("released:%d", time.Now().Unix())
+				changed = true
+			}
+		}
+		if !changed {
+			return nil
+		}
+		return a.Client.Update(ctx, cm)
+	})
+}
+
+func releasedLongAgo(v string, now time.Time) bool {
+	ts, ok := strings.CutPrefix(v, "released:")
+	if !ok {
+		return false
 	}
-	return netip.Addr{}, fmt.Errorf("no free tenant VIP left in the pool (%d addresses)", len(a.VIPs))
+	sec, err := strconv.ParseInt(ts, 10, 64)
+	return err == nil && now.Sub(time.Unix(sec, 0)) >= VIPHold
+}
+
+// vipMap returns the bookkeeping ConfigMap, creating it on first use.
+func (a *Applier) vipMap(ctx context.Context) (*corev1.ConfigMap, error) {
+	cm := &corev1.ConfigMap{}
+	key := client.ObjectKey{Namespace: a.Config.Namespace, Name: vipConfigMap}
+	err := a.Client.Get(ctx, key, cm)
+	if apierrors.IsNotFound(err) {
+		cm = &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Namespace: key.Namespace, Name: key.Name, Labels: map[string]string{LabelManagedBy: ManagedBy}}}
+		if err := a.Client.Create(ctx, cm); err != nil && !apierrors.IsAlreadyExists(err) {
+			return nil, err
+		}
+		err = a.Client.Get(ctx, key, cm)
+	}
+	return cm, err
 }
 
 // ParseVIPRange turns "172.16.201.110-172.16.201.149" into the list of addresses.

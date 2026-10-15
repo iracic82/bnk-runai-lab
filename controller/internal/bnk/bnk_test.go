@@ -2,8 +2,11 @@ package bnk
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -77,26 +80,73 @@ func TestParseVIPRange(t *testing.T) {
 	}
 }
 
-func TestVIPAllocationIsStableAndUnique(t *testing.T) {
-	vips, _ := ParseVIPRange("172.16.201.110-172.16.201.111")
-	c := fake.NewClientBuilder().WithScheme(runtime.NewScheme()).Build()
-	a := &Applier{Client: c, Config: DefaultConfig(), VIPs: vips}
-	ctx := context.Background()
+func newApplier(t *testing.T, n int) *Applier {
+	t.Helper()
+	sc := runtime.NewScheme()
+	_ = corev1.AddToScheme(sc)
+	vips, _ := ParseVIPRange(fmt.Sprintf("172.16.201.110-172.16.201.%d", 109+n))
+	return &Applier{Client: fake.NewClientBuilder().WithScheme(sc).Build(), Config: DefaultConfig(), VIPs: vips}
+}
 
-	// Create the first tenant's gateway the way Apply would, then allocate for both.
-	gw := Render(a.Config, desired("tenant-a", "runai-tenant-a", 40), vips[0].String())[0]
-	if err := c.Create(ctx, gw); err != nil {
-		t.Fatal(err)
+func TestVIPAllocationIsStableAndUnique(t *testing.T) {
+	a := newApplier(t, 2)
+	ctx := context.Background()
+	ipA, _ := a.vipFor(ctx, "tenant-a")
+	ipB, _ := a.vipFor(ctx, "tenant-b")
+	if ipA == ipB {
+		t.Fatalf("both tenants got %v", ipA)
 	}
-	if ip, _ := a.vipFor(ctx, "tenant-a"); ip != vips[0] {
-		t.Errorf("tenant-a keeps %v, got %v", vips[0], ip)
+	if again, _ := a.vipFor(ctx, "tenant-a"); again != ipA {
+		t.Errorf("tenant-a keeps %v, got %v", ipA, again)
 	}
-	if ip, _ := a.vipFor(ctx, "tenant-b"); ip != vips[1] {
-		t.Errorf("tenant-b gets the next free %v, got %v", vips[1], ip)
-	}
-	gw2 := Render(a.Config, desired("tenant-b", "runai-tenant-b", 10), vips[1].String())[0]
-	_ = c.Create(ctx, gw2)
 	if _, err := a.vipFor(ctx, "tenant-c"); err == nil {
 		t.Error("an exhausted pool must be an error")
+	}
+}
+
+func TestReleasedVIPIsHeldBack(t *testing.T) {
+	a := newApplier(t, 1)
+	ctx := context.Background()
+	ipA, _ := a.vipFor(ctx, "tenant-a")
+	if err := a.releaseVIP(ctx, "tenant-a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.vipFor(ctx, "tenant-b"); err == nil {
+		t.Fatal("a just-released VIP must not go to a new tenant")
+	}
+	old := VIPHold
+	VIPHold = 0
+	defer func() { VIPHold = old }()
+	if ip, err := a.vipFor(ctx, "tenant-b"); err != nil || ip != ipA {
+		t.Errorf("after the hold the VIP is reusable: ip=%v err=%v", ip, err)
+	}
+}
+
+func TestApplyRefusesForeignObjects(t *testing.T) {
+	a := newApplier(t, 1)
+	ctx := context.Background()
+	// Someone created a Gateway by hand with the name tenant-a's would get.
+	foreign := &unstructured.Unstructured{}
+	foreign.SetGroupVersionKind(GatewayGVK)
+	foreign.SetNamespace("f5-bnk")
+	foreign.SetName(GatewayName("tenant-a"))
+	foreign.SetLabels(map[string]string{"owner": "someone-else"})
+	if err := a.Client.Create(ctx, foreign); err != nil {
+		t.Fatal(err)
+	}
+	gw := Render(a.Config, desired("tenant-a", "runai-tenant-a", 40), "172.16.201.110")[0]
+	if err := a.mustOwn(ctx, gw, "tenant-a"); err == nil {
+		t.Fatal("must refuse to take over an object it does not manage")
+	}
+	// An object we manage for a different project is refused too.
+	foreign.SetLabels(map[string]string{LabelManagedBy: ManagedBy, LabelProject: "tenant-b"})
+	_ = a.Client.Update(ctx, foreign)
+	if err := a.mustOwn(ctx, gw, "tenant-a"); err == nil {
+		t.Fatal("must refuse an object managed for another project")
+	}
+	foreign.SetLabels(map[string]string{LabelManagedBy: ManagedBy, LabelProject: "tenant-a"})
+	_ = a.Client.Update(ctx, foreign)
+	if err := a.mustOwn(ctx, gw, "tenant-a"); err != nil {
+		t.Errorf("own object must be accepted: %v", err)
 	}
 }

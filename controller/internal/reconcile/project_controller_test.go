@@ -41,7 +41,7 @@ func (a *recordingApplier) Delete(_ context.Context, project string) error {
 
 type memGauge map[string]string
 
-func (g memGauge) Set(p, s string)  { g[p] = s }
+func (g memGauge) Set(p, s string) { g[p] = s }
 func (g memGauge) Forget(p string) { delete(g, p) }
 
 func readyProject(name, ns string, gpu float64, prio int32) *kaiv1alpha1.Project {
