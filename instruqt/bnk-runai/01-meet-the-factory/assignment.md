@@ -42,13 +42,13 @@ The **Lab code** tab shows the controller and install scripts you are running. T
 
 # The cluster
 
-```bash
+```bash,run
 kubectl get nodes -L app,run.ai/simulated-gpu-node-pool
 ```
 
 The gpu node reports GPUs that cost nothing:
 
-```bash
+```bash,run
 kubectl get node gpu -o jsonpath='{.status.allocatable.nvidia\.com/gpu}{"\n"}'
 ```
 
@@ -56,7 +56,7 @@ kubectl get node gpu -o jsonpath='{.status.allocatable.nvidia\.com/gpu}{"\n"}'
 
 TMM, BNK's data plane, runs on the dpu node:
 
-```bash
+```bash,run
 kubectl get pods -n f5-bnk -o wide | grep -E 'tmm|controller'
 ```
 
@@ -64,7 +64,7 @@ kubectl get pods -n f5-bnk -o wide | grep -E 'tmm|controller'
 
 The control plane and the cluster services:
 
-```bash
+```bash,run
 kubectl get pods -n runai-backend --no-headers | wc -l
 kubectl get pods -n runai
 ```

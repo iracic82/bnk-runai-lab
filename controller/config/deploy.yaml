@@ -23,9 +23,6 @@ rules:
   - apiGroups: ["gateway.networking.k8s.io", "inference.networking.k8s.io", "inference.k8s.f5.com", "k8s.f5net.com", "gateway.k8s.f5.com"]
     resources: ["gateways", "httproutes", "inferencepools", "f5epps", "f5bigcneirules", "netpolicies"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["get", "list", "watch", "create", "update"]
   - apiGroups: ["", "events.k8s.io"]
     resources: ["events"]
     verbs: ["create", "patch"]
@@ -41,6 +38,35 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: bnk-runai-tenancy
+subjects:
+  - kind: ServiceAccount
+    name: bnk-runai-tenancy
+    namespace: bnk-runai-tenancy
+---
+# The VIP map is the only ConfigMap the controller touches: namespaced, not cluster-wide.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bnk-runai-tenancy-vips
+  namespace: f5-bnk
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["bnk-runai-tenancy-vips"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bnk-runai-tenancy-vips
+  namespace: f5-bnk
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bnk-runai-tenancy-vips
 subjects:
   - kind: ServiceAccount
     name: bnk-runai-tenancy
