@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+s=$(cat /root/build/status 2>/dev/null || echo missing)
+case "$s" in
+  done) n=$(wc -l < /root/runai-images.txt 2>/dev/null || echo 0)
+        [ "$n" -gt 0 ] || { fail-message "Build finished but no images were published"; exit 1; } ;;
+  running) fail-message "Still building, see /root/build/run.log"; exit 1 ;;
+  *) fail-message "Build status: $s. See /root/build/run.log"; exit 1 ;;
+esac

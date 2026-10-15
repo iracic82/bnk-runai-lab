@@ -1,0 +1,28 @@
+slug: runai-image-build
+id: r9acviwpctgg
+title: Run:ai OSS image build (private)
+teaser: PRIVATE. Compiles open-source NVIDIA Run:ai and publishes the images to Docker
+  Hub for the BNK x Run:ai lab.
+description: |-
+  Private build job, not for learners. Setup starts NVIDIA's local-dev.sh in the background on the
+  builder VM, which compiles about 50 services, deploys them on Kind with fake GPUs as a smoke test,
+  then copies every image to docker.io/iracic82/runai-oss-*. Progress: /root/runai-build.log.
+  The check passes when /root/runai-images.txt lists the published images.
+icon: ""
+tags:
+- runai
+- spike
+owner: f5
+developers:
+- iracic@infoblox.com
+show_timer: true
+idle_timeout: 14400
+timelimit: 14400
+lab_config:
+  sidebar_enabled: true
+  feedback_recap_enabled: false
+  feedback_tab_enabled: false
+  loadingMessages: true
+  hideStopButton: false
+checksum: "1730338246012179796"
+enhanced_loading: false

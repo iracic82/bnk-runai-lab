@@ -1,0 +1,14 @@
+version: "3"
+# One-off builder: compiles open-source NVIDIA Run:ai with NVIDIA's local-dev.sh and publishes the
+# images to Docker Hub, so lab sandboxes pull them instead of compiling. Not for learners.
+virtualmachines:
+- name: builder
+  image: f5/test               # host image: Ubuntu 24.04, 200 GB disk (Instruqt Host images)
+  machine_type: n2-standard-16
+  shell: /bin/bash
+  environment:
+    DOCKERHUB_USER: iracic82
+    RUNAI_REF: 59e288d7
+secrets:
+- name: DOCKERHUB_TOKEN
+  key: DOCKERHUB_TOKEN
