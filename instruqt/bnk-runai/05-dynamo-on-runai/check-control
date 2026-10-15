@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export KUBECONFIG=/etc/kubernetes/admin.conf
+
+NS=$(kubectl get projects.kai.resources dynamo -o jsonpath='{.status.namespace}' 2>/dev/null || true)
+if [ -z "$NS" ]; then
+  fail-message "There is no Run:ai project 'dynamo' with a namespace yet. Run platform/dynamo/deploy.sh."
+  exit 1
+fi
+
+running=$(kubectl -n "$NS" get pods -l dynamo.role=worker --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+if [ "$running" -lt 2 ]; then
+  fail-message "Expected at least 2 Dynamo Mocker workers Running in $NS, found $running."
+  exit 1
+fi
+if ! kubectl -n "$NS" get pods -l app=dynamo-frontend --field-selector=status.phase=Running --no-headers 2>/dev/null | grep -q .; then
+  fail-message "The Dynamo frontend is not Running in $NS."
+  exit 1
+fi
+
+others=$(kubectl -n "$NS" get pods -l dynamo.role=worker -o jsonpath='{range .items[*]}{.spec.schedulerName}{"\n"}{end}' | grep -vc '^kai-scheduler$' || true)
+if [ "$others" -ne 0 ]; then
+  fail-message "Some Dynamo workers were not scheduled by the Run:ai scheduler (kai-scheduler)."
+  exit 1
+fi
+
+VIP=$(kubectl get gateways.gateway.networking.k8s.io -n f5-bnk dynamo -o jsonpath='{.spec.addresses[0].value}' 2>/dev/null || true)
+if [ -z "$VIP" ]; then
+  fail-message "BNK has no Gateway dynamo yet. Is the tenancy controller running?"
+  exit 1
+fi
+
+code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "http://$VIP:8000/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"Qwen/Qwen3-0.6B","messages":[{"role":"user","content":"check"}],"max_tokens":8}' || true)
+if [ "$code" != "200" ]; then
+  fail-message "A request through the BNK VIP $VIP:8000 returned HTTP ${code:-none}, expected 200."
+  exit 1
+fi

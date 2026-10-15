@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"><style>
+*{box-sizing:border-box;margin:0}
+body{width:1600px;height:900px;overflow:hidden;font-family:Inter,Helvetica,Arial,sans-serif;color:#eef1e8;
+ background:radial-gradient(1100px 650px at 88% -12%,#22351a 0,transparent 60%),
+            radial-gradient(900px 600px at -12% 112%,#3a0f18 0,transparent 55%),#0b0d0b;}
+.bar{position:absolute;left:0;top:0;width:100%;height:8px;background:linear-gradient(90deg,#76b900 0 50%,#e4002b 50%)}
+.wrap{position:absolute;inset:0;padding:78px 100px 90px;display:flex;flex-direction:column}
+.eyebrow{font-size:22px;letter-spacing:.14em;text-transform:uppercase;color:#98a08f;font-weight:500}
+h1{font-size:62px;line-height:1.06;font-weight:700;letter-spacing:-.02em;margin-top:18px;max-width:1360px}
+h1 em{font-style:normal;color:#9ccc4a}
+h1 b{font-weight:700;color:#ff5a6e}
+.sub{font-size:27px;line-height:1.42;color:#c3c8bb;margin-top:20px;max-width:1280px}
+.cards{display:grid;gap:22px;margin-top:48px;grid-template-columns:repeat(3,1fr)}
+.card{background:rgba(24,27,23,.88);border:1px solid #2c3229;border-radius:16px;padding:28px 28px 30px;position:relative;overflow:hidden}
+.card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--a)}
+.card .k{font-size:16px;color:#98a08f;letter-spacing:.08em;text-transform:uppercase;font-weight:600}
+.card h3{font-size:30px;font-weight:600;margin-top:12px;line-height:1.15}
+.card p{font-size:20px;line-height:1.45;color:#c3c8bb;margin-top:10px}
+.foot{position:absolute;right:100px;bottom:30px;font-size:16px;color:#6c7365}
+</style></head><body><div class="bar"></div><div class="wrap"><div class="eyebrow">Challenge 5 &middot; NVIDIA Dynamo</div><h1>Dynamo picks the <em>worker</em>.<br>BNK owns the <b>front door</b>.</h1><p class="sub">NVIDIA Dynamo runs here as one more Run:ai project. Run:ai places its workers on GPU fractions, BNK gives the project a VIP and a rate limit, and Dynamo's router sends each request to the worker that already holds its KV cache.</p><div class="cards"><div class="card" style="--a:#76b900"><div class="k">Dynamo</div><h3>Real frontend and router</h3><p>OpenAI API and KV-aware routing. Workers are Mocker, Dynamo's own simulated engine.</p></div><div class="card" style="--a:#6c9aff"><div class="k">Run:ai</div><h3>Schedules every pod</h3><p>Project dynamo, 1 GPU of quota, two workers on half an A10 each.</p></div><div class="card" style="--a:#e4002b"><div class="k">BNK 2.4</div><h3>Serves the tenant</h3><p>Same Gateway, VIP and rate limit as any Run:ai project, plus a route to Dynamo.</p></div></div></div><div class="foot">F5 BIG-IP Next for Kubernetes 2.4 &middot; open-source NVIDIA Run:ai</div></body></html>

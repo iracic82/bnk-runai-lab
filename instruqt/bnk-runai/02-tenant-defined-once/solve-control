@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Idempotent: labctl applies, so re-running converges on the same state.
+export KUBECONFIG=/etc/kubernetes/admin.conf
+set -e
+labctl tenant create tenant-a --gpu 2 --priority 150 --department acme
+labctl tenant create tenant-b --gpu 0.5 --priority 50
+labctl model deploy tenant-a --fraction 0.5
+labctl model deploy tenant-b --fraction 0.5
+labctl tenant delete tenant-c >/dev/null 2>&1 || true
+for i in $(seq 1 60); do
+  a=$(kubectl get gateway -n f5-bnk tenant-a -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)
+  b=$(kubectl get gateway -n f5-bnk tenant-b -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)
+  if [ -n "$a" ] && [ -n "$b" ] && labctl chat tenant-a "ping" >/dev/null 2>&1; then exit 0; fi
+  sleep 5
+done
+echo "tenants did not become ready within 5 minutes" >&2
+exit 1

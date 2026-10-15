@@ -110,11 +110,25 @@ body{width:1400px;height:530px;background:#fff;font-family:Inter,Helvetica,Arial
 </body></html>"""
 
 
+def extra_jobs() -> dict:
+    """Each notes-src/slides_*.py adds slides without touching this file. A module defines
+    build(h) -> {asset_name: (html, width, height)}, where h is this module (slide, card, page, colours)."""
+    import importlib.util, sys
+    out = {}
+    for f in sorted(OUT.glob("slides_*.py")):
+        spec = importlib.util.spec_from_file_location(f.stem, f)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        out.update(mod.build(sys.modules[__name__]))
+    return out
+
+
 async def render() -> None:
     from playwright.async_api import async_playwright
     ASSETS.mkdir(exist_ok=True)
     jobs = {name: (html, 1600, 900) for name, html in SLIDES.items()}
     jobs["01-architecture"] = (ARCH, 1400, 530)
+    jobs.update(extra_jobs())
     async with async_playwright() as p:
         browser = await p.chromium.launch(channel="chrome")  # installed Chrome; no browser download
         for name, (html, w, h) in jobs.items():

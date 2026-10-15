@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Nothing to solve: the debrief is reading only.
+exit 0

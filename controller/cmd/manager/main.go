@@ -67,6 +67,7 @@ func main() {
 	flag.BoolVar(&dryRun, "dry-run", false, "log BNK changes instead of applying them")
 	flag.StringVar(&bnkCfg.Namespace, "bnk-namespace", bnkCfg.Namespace, "namespace of BNK gateways and iRules")
 	flag.StringVar(&bnkCfg.GatewayClass, "gateway-class", bnkCfg.GatewayClass, "GatewayClass served by BNK")
+	flag.StringVar(&bnkCfg.PullSecret, "pull-secret", bnkCfg.PullSecret, "BNK registry secret copied into tenant namespaces (empty: don't copy)")
 	flag.StringVar(&bnkCfg.Tokenizer, "tokenizer", bnkCfg.Tokenizer, "tokenizer for the Endpoint Picker's prefix-cache scorer")
 	flag.StringVar(&bnkCfg.MeteringSink, "metering-sink", "", "IP:port TMM sends usage lines to (the meter on the control node); empty = metering off")
 	flag.StringVar(&meteringTokenFile, "metering-token-file", "", "file holding the shared metering token (required with --metering-sink)")
@@ -114,7 +115,7 @@ func main() {
 		LeaderElectionID:       "bnk-runai-tenancy.tenancy.f5.com",
 		// The VIP map is the only ConfigMap used, and RBAC grants get/update on that one name. A cache
 		// would need list/watch on every ConfigMap, so ConfigMaps are read straight from the API server.
-		Client: client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}}}},
+		Client: client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}}}},
 	})
 	if err != nil {
 		log.Error(err, "manager")

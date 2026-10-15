@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"><style>
+*{box-sizing:border-box;margin:0}
+body{width:1600px;height:900px;overflow:hidden;font-family:Inter,Helvetica,Arial,sans-serif;color:#eef1e8;
+ background:radial-gradient(1100px 650px at 88% -12%,#22351a 0,transparent 60%),
+            radial-gradient(900px 600px at -12% 112%,#3a0f18 0,transparent 55%),#0b0d0b;}
+.bar{position:absolute;left:0;top:0;width:100%;height:8px;background:linear-gradient(90deg,#76b900 0 50%,#e4002b 50%)}
+.wrap{position:absolute;inset:0;padding:78px 100px 90px;display:flex;flex-direction:column}
+.eyebrow{font-size:22px;letter-spacing:.14em;text-transform:uppercase;color:#98a08f;font-weight:500}
+h1{font-size:62px;line-height:1.06;font-weight:700;letter-spacing:-.02em;margin-top:18px;max-width:1360px}
+h1 em{font-style:normal;color:#9ccc4a}
+h1 b{font-weight:700;color:#ff5a6e}
+.sub{font-size:27px;line-height:1.42;color:#c3c8bb;margin-top:20px;max-width:1280px}
+.cards{display:grid;gap:22px;margin-top:48px;grid-template-columns:repeat(3,1fr)}
+.card{background:rgba(24,27,23,.88);border:1px solid #2c3229;border-radius:16px;padding:28px 28px 30px;position:relative;overflow:hidden}
+.card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--a)}
+.card .k{font-size:16px;color:#98a08f;letter-spacing:.08em;text-transform:uppercase;font-weight:600}
+.card h3{font-size:30px;font-weight:600;margin-top:12px;line-height:1.15}
+.card p{font-size:20px;line-height:1.45;color:#c3c8bb;margin-top:10px}
+.foot{position:absolute;right:100px;bottom:30px;font-size:16px;color:#6c7365}
+</style></head><body><div class="bar"></div><div class="wrap"><div class="eyebrow">Challenge 2 &middot; Tenant defined once</div><h1>Create a project in Run:ai.<br><em>BNK builds its front door.</em></h1><p class="sub">You will create two Run:ai projects with different GPU quotas and priorities, deploy a model for each on half of one GPU, and watch BNK tenants appear without touching BNK.</p><div class="cards"><div class="card" style="--a:#76b900"><div class="k">Run:ai</div><h3>tenant-a and tenant-b</h3><p>2 GPU, priority 150. And 0.5 GPU, priority 50.</p></div><div class="card" style="--a:#e0b54a"><div class="k">Controller</div><h3>Quota becomes a limit</h3><p>20 req/s per GPU: 40 for tenant-a, 10 for tenant-b.</p></div><div class="card" style="--a:#e4002b"><div class="k">BNK</div><h3>Delete it, it's gone</h3><p>Remove a project and BNK removes its Gateway, route and limit.</p></div></div></div><div class="foot">F5 BIG-IP Next for Kubernetes 2.4 &middot; open-source NVIDIA Run:ai</div></body></html>

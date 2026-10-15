@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# The debrief has nothing to verify.
+exit 0

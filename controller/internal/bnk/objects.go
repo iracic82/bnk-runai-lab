@@ -56,6 +56,9 @@ type Config struct {
 	Tokenizer string
 	// Port each tenant's Gateway listens on.
 	ListenPort int64
+	// PullSecret is BNK's registry credential in Namespace, copied into each tenant namespace so the
+	// tenant's Endpoint Picker can pull from repo.f5.com. Empty disables the copy.
+	PullSecret string
 	// MeteringSink is the "IP:port" the tenant iRules send one usage line per response to (the meter,
 	// cmd/meter). Empty turns metering off. TMM connects from its own network, so this must be an
 	// address TMM can reach, not a ClusterIP.
@@ -67,17 +70,18 @@ type Config struct {
 // DefaultConfig matches the lab cluster.
 func DefaultConfig() Config {
 	return Config{Namespace: "f5-bnk", GatewayClass: "f5-gateway-class",
-		Tokenizer: "NousResearch/Meta-Llama-3.1-8B-Instruct", ListenPort: 8000}
+		Tokenizer: "NousResearch/Meta-Llama-3.1-8B-Instruct", ListenPort: 8000,
+		PullSecret: "far-pull-secret"}
 }
 
 // Names of a tenant's objects. The Gateway, iRule and NetPolicy live in the BNK namespace, so they
 // carry the project name; the pool, picker and route live in the tenant's own namespace.
-func GatewayName(project string) string { return "tenant-" + project }
+func GatewayName(project string) string { return project }
 func PoolName() string                  { return "model-pool" }
 func EPPName() string                   { return "model-pool-epp" }
 func RouteName() string                 { return "tenant-route" }
-func IRuleName(project string) string   { return "tenant-" + project + "-limit" }
-func PolicyName(project string) string  { return "tenant-" + project + "-policy" }
+func IRuleName(project string) string   { return project + "-limit" }
+func PolicyName(project string) string  { return project + "-policy" }
 
 // Render returns the BNK objects for one Run:ai project, served at vip. It fails when a name that is
 // rendered into the iRule's Tcl is not a plain [a-z0-9-] label.

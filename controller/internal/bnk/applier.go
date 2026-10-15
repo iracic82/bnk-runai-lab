@@ -40,6 +40,9 @@ func (a *Applier) Apply(ctx context.Context, d reconcile.Desired) error {
 	if err != nil {
 		return err
 	}
+	if err := a.copyPullSecret(ctx, d.Tenant.Namespace); err != nil {
+		return err
+	}
 	objs, err := Render(a.Config, d, vip.String())
 	if err != nil {
 		return err
@@ -54,6 +57,26 @@ func (a *Applier) Apply(ctx context.Context, d reconcile.Desired) error {
 		}
 	}
 	return nil
+}
+
+// copyPullSecret puts BNK's registry credential into the tenant namespace. BNK runs each tenant's
+// Endpoint Picker there from repo.f5.com, and the credential ships only in the BNK namespace.
+// Run:ai creates the namespace with the project, so this happens per tenant. Skipped when unset.
+func (a *Applier) copyPullSecret(ctx context.Context, ns string) error {
+	if a.Config.PullSecret == "" {
+		return nil
+	}
+	src := &corev1.Secret{}
+	if err := a.Client.Get(ctx, client.ObjectKey{Namespace: a.Config.Namespace, Name: a.Config.PullSecret}, src); err != nil {
+		return fmt.Errorf("read registry secret %s/%s: %w", a.Config.Namespace, a.Config.PullSecret, err)
+	}
+	dst := &corev1.Secret{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: a.Config.PullSecret, Labels: map[string]string{LabelManagedBy: ManagedBy}},
+		Type:       src.Type,
+		Data:       src.Data,
+	}
+	return a.Client.Patch(ctx, dst, client.Apply, client.FieldOwner(FieldManager), client.ForceOwnership)
 }
 
 // mustOwn refuses objects that exist but were not created by this controller for this project,

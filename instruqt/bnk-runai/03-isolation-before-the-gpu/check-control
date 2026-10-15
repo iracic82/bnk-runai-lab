@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+export KUBECONFIG=/etc/kubernetes/admin.conf
+
+nsa=$(kubectl get projects.kai.resources tenant-a -o jsonpath='{.status.namespace}' 2>/dev/null)
+nsb=$(kubectl get projects.kai.resources tenant-b -o jsonpath='{.status.namespace}' 2>/dev/null)
+[ -n "$nsa" ] && [ -n "$nsb" ] || { fail-message "tenant-a and tenant-b must exist as Run:ai projects. Finish challenge 2 first."; exit 1; }
+
+acc=$(kubectl get httproute -n "$nsa" tenant-route -o jsonpath='{.status.parents[*].conditions[?(@.type=="Accepted")].status}' 2>/dev/null)
+echo "$acc" | grep -q True || { fail-message "tenant-a's route is not Accepted on its Gateway. Check: kubectl get httproute -n $nsa tenant-route -o yaml"; exit 1; }
+
+# The cross-tenant route is optional; if the learner created it, it must not be accepted.
+if kubectl get httproute -n "$nsb" hijack-tenant-a >/dev/null 2>&1; then
+  hj=$(kubectl get httproute -n "$nsb" hijack-tenant-a -o jsonpath='{.status.parents[*].conditions[?(@.type=="Accepted")].status}')
+  if echo "$hj" | grep -q True; then
+    fail-message "tenant-b's route was accepted by tenant-a's Gateway. That should not happen; check the Gateway's allowedRoutes."
+    exit 1
+  fi
+fi
+
+# A 429 for tenant-b: first ask Prometheus, then fall back to provoking one directly.
+seen=0
+prom=$(kubectl get svc -A -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.namespace} {.spec.clusterIP} {.spec.ports[0].port}{"\n"}{end}' 2>/dev/null \
+  | awk '$1 ~ /prometheus/ && $1 !~ /operator|alertmanager|node-exporter|kube-state/ {print "http://"$3":"$4; exit}')
+for url in "$prom" http://localhost:9090; do
+  [ -n "$url" ] || continue
+  v=$(curl -s -m 5 "$url/api/v1/query" --data-urlencode 'query=sum(bnk_requests_total{project="tenant-b",code="429"})' \
+      | jq -r '.data.result[0].value[1] // empty' 2>/dev/null)
+  if [ -n "$v" ] && awk "BEGIN{exit !($v > 0)}"; then seen=1; break; fi
+done
+if [ "$seen" = 0 ]; then
+  vip=$(kubectl get gateway -n f5-bnk tenant-b -o jsonpath='{.status.addresses[0].value}')
+  codes=$(for i in $(seq 1 40); do curl -s -m 5 -o /dev/null -w '%{http_code}\n' "http://$vip:8000/v1/models" & done; wait)
+  echo "$codes" | grep -q '^429$' && seen=1
+fi
+[ "$seen" = 1 ] || { fail-message "No 429 seen for tenant-b. Run: labctl load overload --tenant tenant-b --seconds 60"; exit 1; }
+exit 0

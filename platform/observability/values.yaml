@@ -1,0 +1,184 @@
+# kube-prometheus-stack values for the BNK 2.4 x Run:ai lab (chart version: KUBE_PROMETHEUS_STACK_VERSION
+# in platform/versions.env). Everything lands on the control node, next to the learner terminal and away
+# from the gpu node, so monitoring never competes with the model simulators for CPU.
+#
+# Grafana: anonymous Viewer, no login form, hostPort 3000 on the control node (the Instruqt "Grafana"
+# tab hits control:3000). The chart has no hostPort value, so install.sh adds it with a patch.
+
+crds:
+  enabled: true
+
+# Control node: kubeadm taints it NoSchedule; the monitoring pods tolerate that and pin to it.
+x-control-node: &control
+  nodeSelector: {node-role.kubernetes.io/control-plane: ""}
+  tolerations:
+    - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+
+alertmanager:
+  enabled: false
+
+# kubeadm binds these to 127.0.0.1 on the control node; scraping them only produces down targets.
+kubeEtcd: {enabled: false}
+kubeControllerManager: {enabled: false}
+kubeScheduler: {enabled: false}
+kubeProxy: {enabled: false}
+defaultRules:
+  create: true
+  rules:
+    etcd: false
+    kubeControllerManager: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    kubeProxy: false
+    alertmanager: false
+
+prometheusOperator:
+  <<: *control
+  admissionWebhooks:
+    patch:
+      <<: *control
+
+prometheus:
+  prometheusSpec:
+    <<: *control
+    retention: 2d
+    scrapeInterval: 5s
+    evaluationInterval: 5s
+    # Pick up every ServiceMonitor/PodMonitor/PrometheusRule in the cluster, not only this release's:
+    # ours (monitors.yaml) and the ones the Run:ai operator creates for its own components.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+    podMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelector: {}
+    podMonitorNamespaceSelector: {}
+    ruleSelectorNilUsesHelmValues: false
+    ruleSelector: {}
+    ruleNamespaceSelector: {}
+    probeSelectorNilUsesHelmValues: false
+    scrapeConfigSelectorNilUsesHelmValues: false
+    resources:
+      requests: {cpu: 200m, memory: 512Mi}
+      limits: {memory: 2Gi}
+
+kube-state-metrics:
+  <<: *control
+  # Run:ai project quota and priority as metrics, straight from the kai.resources Project objects the
+  # tenancy controller reads: runai_project_gpu_deserved{project,department,queue,nodepool},
+  # runai_project_priority, runai_project_gpu_allocated and runai_project_phase.
+  rbac:
+    extraRules:
+      - apiGroups: [kai.resources]
+        resources: [projects, departments]
+        verbs: [list, watch]
+  customResourceState:
+    enabled: true
+    config:
+      kind: CustomResourceStateMetrics
+      spec:
+        resources:
+          - groupVersionKind: {group: kai.resources, version: v1alpha1, kind: Project}
+            metricNamePrefix: runai_project
+            labelsFromPath:
+              project: [metadata, name]
+              department: [spec, parent]
+              project_namespace: [status, namespace]
+            metrics:
+              - name: gpu_deserved
+                help: GPU quota (deserved) of each Run:ai project queue.
+                each:
+                  type: Gauge
+                  gauge:
+                    path: [spec, queues]
+                    labelsFromPath: {queue: [name], nodepool: [nodepool]}
+                    valueFrom: [resources, gpu, deserved]
+                    nilIsZero: true
+              - name: priority
+                help: Scheduling priority of each Run:ai project queue.
+                each:
+                  type: Gauge
+                  gauge:
+                    path: [spec, queues]
+                    labelsFromPath: {queue: [name], nodepool: [nodepool]}
+                    valueFrom: [priority]
+              - name: gpu_allocated
+                help: GPUs currently allocated to the Run:ai project (fractions included).
+                each:
+                  type: Gauge
+                  gauge:
+                    path: [status, quotaStatus, allocated]
+                    valueFrom: [gpu]
+                    nilIsZero: true
+              - name: phase
+                help: Phase of the Run:ai project.
+                each:
+                  type: StateSet
+                  stateSet:
+                    path: [status, phase]
+                    labelName: phase
+                    list: [Ready, NotReady, Creating, Updating, Deleting, Initializing, Unknown]
+          - groupVersionKind: {group: kai.resources, version: v1alpha1, kind: Department}
+            metricNamePrefix: runai_department
+            labelsFromPath:
+              department: [metadata, name]
+            metrics:
+              - name: gpu_deserved
+                help: GPU quota (deserved) of each Run:ai department queue.
+                each:
+                  type: Gauge
+                  gauge:
+                    path: [spec, queues]
+                    labelsFromPath: {queue: [name], nodepool: [nodepool]}
+                    valueFrom: [resources, gpu, deserved]
+                    nilIsZero: true
+
+prometheus-node-exporter:
+  resources:
+    requests: {cpu: 20m, memory: 32Mi}
+
+grafana:
+  <<: *control
+  # Admin credentials come from Secret monitoring/grafana-admin (random, created by install.sh).
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  # hostPort 3000 is a single slot: a rolling update would leave the new pod Pending behind the old one.
+  deploymentStrategy: {type: Recreate}
+  service:
+    type: ClusterIP
+  defaultDashboardsEnabled: true
+  defaultDashboardsTimezone: browser
+  grafana.ini:
+    auth.anonymous:
+      enabled: true
+      org_name: Main Org.
+      org_role: Viewer
+    auth:
+      disable_login_form: true
+      disable_signout_menu: true
+    auth.basic:
+      enabled: true          # the admin API (install.sh health checks) still works with basic auth
+    security:
+      allow_embedding: true
+    dashboards:
+      default_home_dashboard_path: /tmp/dashboards/one-tenant-two-planes.json
+    analytics:
+      check_for_updates: false
+      reporting_enabled: false
+    news:
+      news_feed_enabled: false
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+      folder: /tmp/dashboards
+    datasources:
+      enabled: true
+      defaultDatasourceEnabled: true
+      uid: prometheus
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {memory: 512Mi}

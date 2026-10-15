@@ -347,6 +347,18 @@ step "TMM VLANs + self-IPs (external-vlan 1.1, internal-vlan 1.2)"
 retry_apply "$M/19-bnk-net-vlans.yaml"
 ensure_tmm_external
 
+step "GatewayClass for BNK (BNK does not ship one)"
+# controllerName must be f5.com/<CNEInstance namespace>-f5-cne-controller, or every Gateway sits
+# "Waiting for controller" (verified live in bnk-ai-kv-lab 2026-10-07 and again here 2026-10-15).
+kubectl apply -f - <<'GWC'
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: f5-gateway-class
+spec:
+  controllerName: f5.com/f5-bnk-f5-cne-controller
+GWC
+
 step "BNK 2.4 ready"
 kubectl get nodes -o wide
 kubectl get pods -n f5-bnk -o wide | grep -E 'tmm|controller' || true

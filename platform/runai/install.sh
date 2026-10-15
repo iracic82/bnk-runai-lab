@@ -63,6 +63,12 @@ grep -q " ${DOMAIN}$" /etc/hosts || echo "${RUNAI_NODE_IP} ${DOMAIN}" >> /etc/ho
 step "TLS + namespaces + secrets (NVIDIA local-dev functions)"
 generate_tls
 create_namespace_and_secrets
+# Trust the lab CA on this node, so labctl and curl verify https://${DOMAIN} instead of using -k.
+# generate_tls writes it to ${CERT_DIR}/ca.crt (${RUNAI_SRC}/.local-dev/certs).
+install -d -m 755 /etc/runai
+install -m 644 "${CERT_DIR}/ca.crt" /etc/runai/ca.crt
+install -m 644 "${CERT_DIR}/ca.crt" /usr/local/share/ca-certificates/runai-lab-ca.crt
+update-ca-certificates >/dev/null 2>&1 || echo "  WARNING: update-ca-certificates failed; tools must pass --cacert /etc/runai/ca.crt" >&2
 # Pods resolve the domain to the runai node, where ingress-nginx listens on the host network.
 cf="$(kubectl -n kube-system get cm coredns -o jsonpath='{.data.Corefile}')"
 if [[ "$cf" != *"${DOMAIN}:53"* ]]; then
@@ -85,7 +91,7 @@ provision_cluster_credentials
 step "Run:ai cluster chart (scheduler + resource management)"
 # runai-operator watches ServiceMonitor/PodMonitor/PrometheusRule and exits if their CRDs are absent
 # (NVIDIA's local-dev cluster ships them; ours gets them here, Prometheus itself comes later).
-kubectl apply --server-side -f "https://github.com/prometheus-operator/prometheus-operator/releases/download/${PROMETHEUS_OPERATOR_VERSION:-v0.79.2}/stripped-down-crds.yaml"
+bash "${LAB_ROOT}/platform/observability/install.sh" --crds-only
 use_hub_registry deploy_runai_cluster
 # A release left by a failed install carries its old image names; its uninstall hooks would run
 # with them and hang. Remove it without hooks so NVIDIA's function starts from a clean slate.

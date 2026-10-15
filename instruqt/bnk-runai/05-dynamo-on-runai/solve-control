@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export KUBECONFIG=/etc/kubernetes/admin.conf
+bash /root/lab/platform/dynamo/deploy.sh agg

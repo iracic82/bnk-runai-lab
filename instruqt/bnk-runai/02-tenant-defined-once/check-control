@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+export KUBECONFIG=/etc/kubernetes/admin.conf
+for t in tenant-a tenant-b; do
+  phase=$(kubectl get projects.kai.resources "$t" -o jsonpath='{.status.phase}' 2>/dev/null)
+  [ "$phase" = "Ready" ] || { fail-message "Run:ai project $t is not Ready yet (phase: ${phase:-missing}). Create it with labctl tenant create."; exit 1; }
+  addr=$(kubectl get gateway -n f5-bnk "$t" -o jsonpath='{.status.addresses[0].value}' 2>/dev/null)
+  [ -n "$addr" ] || { fail-message "BNK has no Gateway with an address for $t yet. Give the controller a few seconds, then run: kubectl get gateway -n f5-bnk"; exit 1; }
+done
+vip=$(kubectl get gateway -n f5-bnk tenant-a -o jsonpath='{.status.addresses[0].value}')
+model=$(curl -s -m 5 "http://$vip:8000/v1/models" | jq -r '.data[0].id // empty' 2>/dev/null)
+code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "http://$vip:8000/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"${model:-default}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":8}")
+[ "$code" = "200" ] || { fail-message "A chat to tenant-a's VIP ($vip) returned HTTP $code, not 200. Did you deploy its model? Run: labctl model deploy tenant-a --fraction 0.5"; exit 1; }
+exit 0

@@ -3,6 +3,8 @@ package bnk
 import (
 	"context"
 	"fmt"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"strings"
 	"testing"
 
@@ -297,5 +299,29 @@ func TestApplyRefusesForeignObjects(t *testing.T) {
 	_ = a.Client.Update(ctx, foreign)
 	if err := a.mustOwn(ctx, gw, "tenant-a"); err != nil {
 		t.Errorf("own object must be accepted: %v", err)
+	}
+}
+
+func TestApplyCopiesPullSecretIntoTenantNamespace(t *testing.T) {
+	a := newApplier(t, 1)
+	ctx := context.Background()
+	src := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "f5-bnk", Name: "far-pull-secret"},
+		Type: corev1.SecretTypeDockerConfigJson, Data: map[string][]byte{".dockerconfigjson": []byte("{}")}}
+	if err := a.Client.Create(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.copyPullSecret(ctx, "runai-tenant-a"); err != nil {
+		t.Fatal(err)
+	}
+	got := &corev1.Secret{}
+	if err := a.Client.Get(ctx, client.ObjectKey{Namespace: "runai-tenant-a", Name: "far-pull-secret"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Type != corev1.SecretTypeDockerConfigJson || string(got.Data[".dockerconfigjson"]) != "{}" {
+		t.Errorf("copied secret = %+v", got)
+	}
+	a.Config.PullSecret = ""
+	if err := a.copyPullSecret(ctx, "runai-other"); err != nil {
+		t.Errorf("empty PullSecret must be a no-op, got %v", err)
 	}
 }

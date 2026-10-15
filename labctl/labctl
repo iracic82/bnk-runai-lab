@@ -1,0 +1,613 @@
+#!/usr/bin/env bash
+# labctl: the learner and check-script CLI for the BNK 2.4 x open-source NVIDIA Run:ai lab.
+# Contract: specs/001-bnk-runai-lab/contracts/labctl.md. Runs on the control node; cwd-independent.
+#
+# Run:ai projects and departments are created through the Run:ai REST API (https://runai.lab), the way
+# the Run:ai UI does it. A direct `kubectl apply` of a kai.resources Project is refused by Run:ai's
+# admission webhook (only Run:ai's own service accounts may write them). Everything else is read with
+# kubectl: the kai.resources Project Run:ai writes is what the tenancy controller reads, and the BNK
+# objects carry the label tenancy.f5.com/project=<project>.
+set -euo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+LAB_ROOT="${LAB_ROOT:-$(cd "$(dirname "$SELF")/.." && pwd)}"
+export KUBECONFIG="${KUBECONFIG:-/etc/kubernetes/admin.conf}"
+[ -f "${LAB_ROOT}/platform/versions.env" ] && . "${LAB_ROOT}/platform/versions.env" 2>/dev/null || true
+
+BNK_NS="${BNK_NS:-f5-bnk}"
+TENANCY_NS="${TENANCY_NS:-bnk-runai-tenancy}"
+RUNAI_URL="${RUNAI_URL:-https://${RUNAI_DOMAIN:-runai.lab}}"
+RUNAI_ADMIN_EMAIL="${RUNAI_ADMIN_EMAIL:-admin@acme.lab}"
+RUNAI_ADMIN_PASSWORD="${RUNAI_ADMIN_PASSWORD:-Lab-Admin-1!}"
+RUNAI_CLUSTER_NAME="${RUNAI_CLUSTER_NAME:-acme-ai-factory}"
+# The lab CA that signs runai.lab (platform/runai/install.sh copies it here). Never fall back to -k.
+RUNAI_CA_FILE="${RUNAI_CA_FILE:-/etc/runai/ca.crt}"
+RUNAI_NODEPOOL="${RUNAI_NODEPOOL:-default}"
+DEFAULT_DEPARTMENT="${LABCTL_DEPARTMENT:-default}"
+SIM_IMAGE="${MODEL_SIM_IMAGE:-ghcr.io/iracic82/vllm-twin:0.2.0}"
+case "$SIM_IMAGE" in TODO*|"") SIM_IMAGE=ghcr.io/iracic82/vllm-twin:0.2.0 ;; esac
+SIM_MODEL="${SIM_MODEL:-NousResearch/Meta-Llama-3.1-8B-Instruct}"
+MODEL_PORT=8000
+export VIP_PORT="${VIP_PORT:-8000}"   # BNK tenant Gateway listener port
+GRAFANA_PORT="${GRAFANA_PORT:-3000}"
+DASH_UID=one-tenant-two-planes
+JSON=0
+
+# Run:ai's scheduling ranks (control-plane/org-unit-service RankValuesMap @ run-ai 59e288d7). The API
+# takes the name; Run:ai writes the number as the queue priority the tenancy controller reads.
+RANKS="Highest:255 VeryHigh:240 High:210 MediumHigh:180 Medium:150 MediumLow:100 Low:50 VeryLow:20 Lowest:1"
+
+die()  { echo "labctl: $*" >&2; exit 1; }
+info() { [ "$JSON" = 1 ] && echo "$*" >&2 || echo "$*"; }
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed"; }
+need kubectl; need jq; need curl
+k() { kubectl "$@"; }
+
+usage() {
+  cat <<'EOF'
+labctl - BNK 2.4 x Run:ai lab CLI
+
+  labctl status [--json]
+  labctl tenant create <name> --gpu <n> [--priority <p>] [--department <d>] [--no-wait] [--json]
+  labctl tenant delete <name> [--no-wait]
+  labctl tenant show <name> [--json]
+  labctl tenant list [--json]
+  labctl model deploy <tenant> [<model>] [--replicas N] [--fraction F] [--name N] [--json]
+  labctl model delete <tenant> [--name N]
+  labctl vip <tenant>
+  labctl chat <tenant> "<prompt>" [--max-tokens N] [--json]
+  labctl load steady|overload|prefix-heavy [--tenant T] [--seconds S] [--rps R] [--json]
+  labctl dash [panel]
+  labctl verify <challenge>          e.g. 02 or 02-tenant-defined-once
+
+--priority takes a number (mapped to the nearest Run:ai rank at or below it: 255 Highest, 240,
+210, 180, 150 Medium, 100 MediumLow, 50 Low, 20, 1 Lowest) or a rank name such as High.
+EOF
+}
+
+# ---------------------------------------------------------------------------------------- helpers
+project_json() { k get projects.kai.resources "$1" -o json 2>/dev/null; }
+project_ns()   { k get projects.kai.resources "$1" -o jsonpath='{.status.namespace}' 2>/dev/null || true; }
+
+require_ns() {
+  local ns; ns="$(project_ns "$1")"
+  [ -n "$ns" ] || die "Run:ai project '$1' has no namespace yet (create it: labctl tenant create $1 --gpu 1)"
+  echo "$ns"
+}
+
+gateway_vip() {
+  local gw="$1" v
+  v="$(k get gateways.gateway.networking.k8s.io -n "$BNK_NS" "$gw" -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)"
+  [ -n "$v" ] || v="$(k get gateways.gateway.networking.k8s.io -n "$BNK_NS" "$gw" -o jsonpath='{.spec.addresses[0].value}' 2>/dev/null || true)"
+  echo "$v"
+}
+
+require_vip() {
+  local v; v="$(gateway_vip "$1")"
+  [ -n "$v" ] || die "no BNK Gateway with an address for '$1' (kubectl get gateway -n $BNK_NS $1). Is the project Ready and the tenancy controller running?"
+  echo "$v"
+}
+
+rate_limit() { # requests/s from the tenant's iRule
+  k get f5-big-cne-irules.k8s.f5net.com -n "$BNK_NS" "$1-limit" -o jsonpath='{.spec.iRule}' 2>/dev/null \
+    | grep -o 'rl_n > [0-9]*' | head -1 | awk '{print $3}' || true
+}
+
+rank_for() { # number or rank name -> rank name
+  local p="$1" best="Lowest" name val lp
+  lp="$(tr '[:upper:]' '[:lower:]' <<<"$p")"
+  for r in $RANKS; do
+    name="${r%%:*}"
+    if [ "$lp" = "$(tr '[:upper:]' '[:lower:]' <<<"$name")" ]; then echo "$name"; return 0; fi
+  done
+  [[ "$p" =~ ^[0-9]+$ ]] || die "--priority must be a number or a Run:ai rank name ($(sed 's/:[0-9]*//g' <<<"$RANKS"))"
+  for r in $RANKS; do
+    name="${r%%:*}"; val="${r##*:}"
+    if [ "$p" -ge "$val" ]; then echo "$name"; return 0; fi
+  done
+  echo "$best"
+}
+rank_value() { local r; for r in $RANKS; do [ "${r%%:*}" = "$1" ] && { echo "${r##*:}"; return; }; done; echo ""; }
+
+cluster_gpus() { # total allocatable GPUs on the cluster (fake-gpu-operator advertises nvidia.com/gpu)
+  local n
+  n="$(k get nodes -o json 2>/dev/null | jq '[.items[].status.allocatable["nvidia.com/gpu"] // "0" | tonumber] | add // 0')"
+  [ "${n:-0}" -gt 0 ] 2>/dev/null && echo "$n" || echo 4
+}
+
+# --------------------------------------------------------------------------------- Run:ai REST API
+TOKEN=""
+runai_ca() { # the Run:ai API is always TLS-verified against the lab CA
+  [ -r "$RUNAI_CA_FILE" ] || die "lab CA $RUNAI_CA_FILE not found (platform/runai/install.sh installs it); set RUNAI_CA_FILE to the CA that signs ${RUNAI_URL#https://}"
+}
+api_token() {
+  [ -n "$TOKEN" ] && return 0
+  local body resp
+  runai_ca
+  body="$(jq -nc --arg u "$RUNAI_ADMIN_EMAIL" --arg p "$RUNAI_ADMIN_PASSWORD" '{grantType:"password",username:$u,password:$p}')"
+  resp="$(curl -s --cacert "$RUNAI_CA_FILE" -m 20 -X POST "$RUNAI_URL/api/v1/token" -H 'Content-Type: application/json' -d "$body")" \
+    || die "cannot reach the Run:ai API at $RUNAI_URL (is runai.lab in /etc/hosts?)"
+  TOKEN="$(jq -r '.accessToken // .access_token // empty' <<<"$resp" 2>/dev/null || true)"
+  [ -n "$TOKEN" ] || die "Run:ai API login as $RUNAI_ADMIN_EMAIL failed: $(head -c 300 <<<"$resp")"
+}
+
+# api METHOD PATH [JSON]  -> prints the response body; dies on HTTP >= 400 with the API's message
+api() {
+  local method="$1" path="$2" data="${3:-}" out code
+  api_token
+  out="$(mktemp)"
+  local args=(-s --cacert "$RUNAI_CA_FILE" -m 30 -o "$out" -w '%{http_code}' -X "$method" "$RUNAI_URL$path"
+              -H "Authorization: Bearer $TOKEN" -H 'Accept: application/json')
+  [ -n "$data" ] && args+=(-H 'Content-Type: application/json' -d "$data")
+  code="$(curl "${args[@]}")" || { rm -f "$out"; die "Run:ai API $method $path: connection failed"; }
+  if [ "$code" -ge 400 ] 2>/dev/null || [ "$code" = 000 ]; then
+    local msg; msg="$(jq -r '.message // .details // .error // empty' "$out" 2>/dev/null || true)"
+    [ -n "$msg" ] || msg="$(head -c 400 "$out")"
+    rm -f "$out"; die "Run:ai API $method $path -> HTTP $code: $msg"
+  fi
+  cat "$out"; rm -f "$out"
+}
+urlenc() { jq -rn --arg s "$1" '$s|@uri'; }
+
+CLUSTER_ID=""; NODEPOOL_ID=""
+api_ids() {
+  [ -n "$CLUSTER_ID" ] && return 0
+  api_token   # in this shell, so later $(api ...) subshells reuse the token
+  local clusters
+  clusters="$(api GET /api/v1/clusters)"
+  CLUSTER_ID="$(jq -r --arg n "$RUNAI_CLUSTER_NAME" '(map(select(.name==$n)) + .)[0].uuid // empty' <<<"$clusters")"
+  [ -n "$CLUSTER_ID" ] || die "the Run:ai control plane has no registered cluster"
+  NODEPOOL_ID="$(api GET "/api/v1/node-pools?filterBy=$(urlenc "name==$RUNAI_NODEPOOL")&filterBy=$(urlenc "clusterId==$CLUSTER_ID")" \
+    | jq -r '.nodepools[0].id // empty')"
+  [ -n "$NODEPOOL_ID" ] || die "Run:ai has no node pool '$RUNAI_NODEPOOL' on cluster $RUNAI_CLUSTER_NAME"
+}
+
+api_project_id() { # name -> id or empty
+  api_ids
+  api GET "/api/v1/org-unit/projects?filterBy=$(urlenc "name==$1")&filterBy=$(urlenc "clusterId==$CLUSTER_ID")" \
+    | jq -r --arg n "$1" '[.projects[] | select(.name==$n)][0].id // empty'
+}
+
+api_department_id() { # name -> id, created if missing, with GPU quota >= the cluster's GPUs
+  local name="$1" id gpus cur
+  api_ids
+  gpus="$(cluster_gpus)"
+  id="$(api GET "/api/v1/org-unit/departments?filterBy=$(urlenc "name==$name")&filterBy=$(urlenc "clusterId==$CLUSTER_ID")" \
+        | jq -r --arg n "$name" '[.departments[] | select(.name==$n)][0].id // empty')"
+  if [ -z "$id" ]; then
+    info "  creating Run:ai department '$name' (GPU quota $gpus)" >&2
+    id="$(api POST /api/v1/org-unit/departments "$(jq -nc --arg n "$name" --arg c "$CLUSTER_ID" --arg np "$NODEPOOL_ID" \
+      --arg npn "$RUNAI_NODEPOOL" --argjson g "$gpus" \
+      '{name:$n, clusterId:$c, resources:[{nodePool:{id:$np,name:$npn}, gpu:{deserved:$g}}]}')" | jq -r '.id')"
+    echo "$id"; return 0
+  fi
+  # A department's quota caps its projects' quotas; keep it at the whole (simulated) estate.
+  cur="$(api GET "/api/v1/org-unit/departments/$id" | jq -r --arg np "$NODEPOOL_ID" \
+         '[.resources[]? | select(.nodePool.id==$np) | .gpu.deserved][0] // 0')"
+  if jq -en --argjson c "${cur:-0}" --argjson g "$gpus" '$c >= 0 and $c < $g' >/dev/null; then
+    info "  raising department '$name' GPU quota $cur -> $gpus" >&2
+    ( api PATCH "/api/v1/org-unit/departments/$id/resources" "$(jq -nc --arg np "$NODEPOOL_ID" --arg npn "$RUNAI_NODEPOOL" \
+      --argjson g "$gpus" '[{nodePool:{id:$np,name:$npn}, gpu:{deserved:$g}}]')" >/dev/null ) \
+      || info "  warning: could not raise department '$name' quota; a project above it may be refused" >&2
+  fi
+  echo "$id"
+}
+
+# ------------------------------------------------------------------------------------------ tenant
+wait_project() { # name gpu timeout -> waits for Ready + namespace (+ the quota, if given)
+  local name="$1" gpu="${2:-}" t="${3:-240}" p phase ns got
+  for _ in $(seq 1 "$t"); do
+    p="$(project_json "$name" || true)"
+    if [ -n "$p" ]; then
+      phase="$(jq -r '.status.phase // ""' <<<"$p")"; ns="$(jq -r '.status.namespace // ""' <<<"$p")"
+      got="$(jq -r '[.spec.queues[]?.resources.gpu.deserved // 0] | add // 0' <<<"$p")"
+      if [ "$phase" = Ready ] && [ -n "$ns" ] && { [ -z "$gpu" ] || jq -en --argjson a "$got" --argjson b "$gpu" '$a == $b' >/dev/null; }; then
+        k get namespace "$ns" >/dev/null 2>&1 && return 0
+      fi
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+tenant_create() {
+  local name="" gpu="" prio="" dept="" wait=1
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --gpu) gpu="$2"; shift 2 ;;
+      --priority) prio="$2"; shift 2 ;;
+      --department) dept="$2"; shift 2 ;;
+      --no-wait) wait=0; shift ;;
+      --json) JSON=1; shift ;;
+      -*) die "unknown option $1" ;;
+      *) if [ -z "$name" ]; then name="$1"; else die "unexpected argument $1"; fi; shift ;;
+    esac
+  done
+  [ -n "$name" ] || die "usage: labctl tenant create <name> --gpu <n> [--priority <p>] [--department <d>]"
+  [[ "$name" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || die "project name must be lowercase letters, digits and '-'"
+  [ -n "$gpu" ] || die "--gpu is required (e.g. --gpu 0.5)"
+  [[ "$gpu" =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "--gpu must be a number"
+  local rank=""; [ -n "$prio" ] && rank="$(rank_for "$prio")"
+
+  local res id action
+  api_ids
+  res="$(jq -nc --arg np "$NODEPOOL_ID" --arg npn "$RUNAI_NODEPOOL" --argjson g "$gpu" --arg r "$rank" \
+    '[{nodePool:{id:$np,name:$npn}, gpu:{deserved:$g}} + (if $r=="" then {} else {rank:$r} end)]')"
+  id="$(api_project_id "$name")"
+  if [ -n "$id" ]; then
+    action=updated
+    [ -n "$dept" ] && {
+      local cur; cur="$(project_json "$name" | jq -r '.spec.parent // empty' || true)"
+      [ -z "$cur" ] || [ "$cur" = "$dept" ] || info "  note: '$name' stays in department '$cur' (Run:ai cannot move a project)"
+      api_department_id "${cur:-$dept}" >/dev/null
+    }
+    api PATCH "/api/v1/org-unit/projects/$id/resources" "$res" >/dev/null
+  else
+    action=created
+    local did; did="$(api_department_id "${dept:-$DEFAULT_DEPARTMENT}")"
+    id="$(api POST /api/v1/org-unit/projects "$(jq -nc --arg n "$name" --arg c "$CLUSTER_ID" --arg p "$did" \
+      --arg ns "runai-$name" --argjson r "$res" \
+      '{name:$n, clusterId:$c, parentId:$p, requestedNamespace:$ns, resources:$r}')" | jq -r '.id')"
+  fi
+  info "Run:ai project $name $action (id $id): gpu deserved $gpu${rank:+, rank $rank ($(rank_value "$rank"))}"
+  if [ "$wait" = 1 ]; then
+    info "  waiting for Run:ai to report $name Ready with its namespace and quota..."
+    wait_project "$name" "$gpu" 300 || die "project $name not Ready after 300s: $(project_json "$name" | jq -c '.status // {}' 2>/dev/null)"
+  fi
+  local ns; ns="$(project_ns "$name")"
+  info "  namespace: ${ns:-pending}"
+  if [ "$JSON" = 1 ]; then
+    jq -nc --arg n "$name" --arg id "$id" --arg a "$action" --arg ns "$ns" --argjson g "$gpu" --arg r "$rank" \
+      '{project:$n, id:$id, action:$a, namespace:$ns, gpuDeserved:$g, rank:(if $r=="" then null else $r end)}'
+  fi
+}
+
+tenant_delete() {
+  local name="" wait=1
+  while [ $# -gt 0 ]; do
+    case "$1" in --no-wait) wait=0; shift ;; --json) JSON=1; shift ;; -*) die "unknown option $1" ;; *) name="$1"; shift ;; esac
+  done
+  [ -n "$name" ] || die "usage: labctl tenant delete <name>"
+  api_ids
+  local id; id="$(api_project_id "$name")"
+  if [ -z "$id" ]; then
+    info "Run:ai project $name does not exist"
+  else
+    api DELETE "/api/v1/org-unit/projects/$id" >/dev/null
+    info "Run:ai project $name deleted (id $id)"
+  fi
+  if [ "$wait" = 1 ]; then
+    for _ in $(seq 1 180); do k get projects.kai.resources "$name" >/dev/null 2>&1 || break; sleep 1; done
+    k get projects.kai.resources "$name" >/dev/null 2>&1 && die "kai.resources Project $name still present after 180s"
+    info "  kai.resources Project $name is gone; the tenancy controller removes its BNK objects"
+  fi
+}
+
+BNK_KINDS="gateways.gateway.networking.k8s.io httproutes.gateway.networking.k8s.io inferencepools.inference.networking.k8s.io f5-epps.inference.k8s.f5.com f5-big-cne-irules.k8s.f5net.com netpolicies.gateway.k8s.f5.com"
+
+tenant_show() {
+  local name=""
+  while [ $# -gt 0 ]; do case "$1" in --json) JSON=1; shift ;; *) name="$1"; shift ;; esac; done
+  [ -n "$name" ] || die "usage: labctl tenant show <name>"
+  local p; p="$(project_json "$name" || true)"
+  [ -n "$p" ] || die "no Run:ai project '$name' (kubectl get projects.kai.resources)"
+  local ns vip rl objs kind crit
+  ns="$(jq -r '.status.namespace // ""' <<<"$p")"
+  vip="$(gateway_vip "$name")"; rl="$(rate_limit "$name")"
+  objs="[]"
+  for kind in $BNK_KINDS; do
+    objs="$(jq -c --argjson acc "$objs" --arg kind "${kind%%.*}" \
+      '$acc + [.items[] | {kind:.kind, namespace:.metadata.namespace, name:.metadata.name}]' \
+      < <(k get "$kind" -A -l "tenancy.f5.com/project=$name" -o json 2>/dev/null || echo '{"items":[]}'))"
+  done
+  local usage; usage="$(k get configmap -n "$TENANCY_NS" bnk-runai-usage -o json 2>/dev/null \
+    | jq -c --arg p "project.$name" '.data[$p] // empty | (fromjson? // .)' 2>/dev/null || true)"
+  crit="$(k get events -A --field-selector "involvedObject.kind=Project,involvedObject.name=$name" -o json 2>/dev/null \
+          | jq -r '[.items[] | select(.reason=="BNKTenantReady")] | sort_by(.lastTimestamp // .eventTime) | last | .message // ""' || true)"
+  local out
+  out="$(jq -c --arg vip "$vip" --arg rl "$rl" --argjson objs "$objs" --arg ev "$crit" --argjson tok "${usage:-null}" '{
+      project: .metadata.name,
+      runai: {department: .spec.parent, namespace: (.status.namespace // null), phase: (.status.phase // null),
+              gpuDeserved: ([.spec.queues[]?.resources.gpu.deserved // 0] | add // 0),
+              queues: [.spec.queues[]? | {name, nodepool, priority, gpu: .resources.gpu}],
+              allocated: (.status.quotaStatus.allocated // {})},
+      bnk: {vip: (if $vip=="" then null else $vip + ":" + env.VIP_PORT end),
+            rateLimitRps: (if $rl=="" then null else ($rl|tonumber) end),
+            lastEvent: (if $ev=="" then null else $ev end), tokensMetered: $tok, objects: $objs}
+    }' <<<"$p")"
+  if [ "$JSON" = 1 ]; then echo "$out"; return; fi
+  jq -r '
+    "Run:ai project  \(.project)",
+    "  department    \(.runai.department // "-")",
+    "  namespace     \(.runai.namespace // "-")",
+    "  phase         \(.runai.phase // "-")",
+    "  GPU deserved  \(.runai.gpuDeserved)",
+    (.runai.queues[] | "  queue         \(.name)  nodepool=\(.nodepool)  priority=\(.priority // "-")  gpu deserved=\(.gpu.deserved // 0) limit=\(.gpu.limit // "-")"),
+    "  allocated     \(.runai.allocated | to_entries | map("\(.key)=\(.value)") | join(" ") | if .=="" then "-" else . end)",
+    "",
+    "BNK tenant (label tenancy.f5.com/project=\(.project))",
+    "  VIP           \(.bnk.vip // "not assigned yet")",
+    "  rate limit    \(if .bnk.rateLimitRps then "\(.bnk.rateLimitRps) req/s (iRule tenant-\(.project)-limit)" else "-" end)",
+    "  last event    \(.bnk.lastEvent // "-")",
+    "  tokens        \(if .bnk.tokensMetered == null then "-" elif (.bnk.tokensMetered|type)=="object" then (.bnk.tokensMetered | to_entries | map("\(.key)=\(.value)") | join(" ")) else (.bnk.tokensMetered|tostring) end)  (ConfigMap \(env.TENANCY_NS // "bnk-runai-tenancy")/bnk-runai-usage)",
+    (if (.bnk.objects|length)==0 then "  objects       none yet" else (.bnk.objects[] | "  \(.kind|.+"              "|.[0:14]) \(.namespace)/\(.name)") end)
+  ' <<<"$out"
+}
+
+tenant_list() {
+  [ "${1:-}" = --json ] && JSON=1
+  local ps; ps="$(k get projects.kai.resources -o json)"
+  local rows="[]" n
+  for n in $(jq -r '.items[].metadata.name' <<<"$ps"); do
+    rows="$(jq -c --argjson acc "$rows" --arg v "$(gateway_vip "$n")" --arg rl "$(rate_limit "$n")" --arg n "$n" \
+      '$acc + [.items[] | select(.metadata.name==$n) | {project:$n, department:.spec.parent, namespace:(.status.namespace//null),
+        phase:(.status.phase//null), gpuDeserved:([.spec.queues[]?.resources.gpu.deserved // 0]|add // 0),
+        priority:([.spec.queues[]?.priority // empty]|max), vip:(if $v=="" then null else $v end),
+        rateLimitRps:(if $rl=="" then null else ($rl|tonumber) end)}]' <<<"$ps")"
+  done
+  if [ "$JSON" = 1 ]; then echo "$rows"; return; fi
+  { echo "PROJECT DEPARTMENT NAMESPACE PHASE GPU PRIORITY VIP RPS"
+    jq -r '.[] | [.project, .department, (.namespace//"-"), (.phase//"-"), .gpuDeserved, (.priority//"-"), (.vip//"-"), (.rateLimitRps//"-")] | @tsv' <<<"$rows"
+  } | (column -t 2>/dev/null || cat)
+}
+
+# ------------------------------------------------------------------------------------------- model
+kai_setting() { # field of the KAI config Run:ai deploys (schedulerName, queueLabelKey), with a default
+  local v; v="$(k get configs.kai.scheduler kai-config -o jsonpath="{.spec.global.$1}" 2>/dev/null || true)"
+  echo "${v:-$2}"
+}
+
+model_deploy() {
+  local tenant="" model="" replicas=1 fraction=0.5 name="model"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --replicas) replicas="$2"; shift 2 ;;
+      --fraction) fraction="$2"; shift 2 ;;
+      --name) name="$2"; shift 2 ;;
+      --model) model="$2"; shift 2 ;;
+      --json) JSON=1; shift ;;
+      -*) die "unknown option $1" ;;
+      *) if [ -z "$tenant" ]; then tenant="$1"; elif [ -z "$model" ]; then model="$1"; else die "unexpected argument $1"; fi; shift ;;
+    esac
+  done
+  [ -n "$tenant" ] || die "usage: labctl model deploy <tenant> [<model>] [--replicas N] [--fraction F]"
+  [[ "$replicas" =~ ^[0-9]+$ ]] || die "--replicas must be a whole number"
+  [[ "$fraction" =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "--fraction must be a number"
+  model="${model:-$SIM_MODEL}"
+  local ns sched qkey gpu_res="" annot=""
+  ns="$(require_ns "$tenant")"
+  sched="$(kai_setting schedulerName kai-scheduler)"
+  qkey="$(kai_setting queueLabelKey kai.scheduler/queue)"
+  # KAI GPU sharing: a fraction in (0,1) is the gpu-fraction pod annotation with NO nvidia.com/gpu
+  # request (KAI admission rejects combining them); whole GPUs are a normal nvidia.com/gpu limit.
+  if jq -en --argjson f "$fraction" '$f > 0 and $f < 1' >/dev/null; then
+    annot="gpu-fraction: \"$fraction\""
+  elif jq -en --argjson f "$fraction" '$f >= 1 and ($f|floor) == $f' >/dev/null; then
+    gpu_res="nvidia.com/gpu: \"${fraction%.*}\""
+  elif ! jq -en --argjson f "$fraction" '$f == 0' >/dev/null; then
+    die "--fraction must be between 0 and 1, or a whole number of GPUs"
+  fi
+  # The project's queue for this node pool, as Run:ai named it in the kai.resources Project.
+  local queue
+  queue="$(project_json "$tenant" | jq -r --arg np "$RUNAI_NODEPOOL" --arg t "$tenant" \
+           '([.spec.queues[]? | select(.nodepool==$np) | .name] + [$t])[0]')"
+  local qlabels="kai.scheduler/queue: \"$queue\""
+  if [ "$qkey" != kai.scheduler/queue ]; then qlabels="$qlabels
+        $qkey: \"$queue\""; fi
+
+  k apply -f - <<EOF >/dev/null
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: $name
+  namespace: $ns
+  labels:
+    app.kubernetes.io/name: $name
+    app.kubernetes.io/part-of: model-server
+    app.kubernetes.io/managed-by: labctl
+    tenancy.f5.com/project: "$tenant"
+spec:
+  replicas: $replicas
+  selector:
+    matchLabels: {app.kubernetes.io/name: $name, app.kubernetes.io/part-of: model-server}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: $name
+        app.kubernetes.io/part-of: model-server
+        tenancy.f5.com/project: "$tenant"
+        $qlabels
+      annotations:
+        ${annot:-labctl/gpu: none}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "$MODEL_PORT"
+        prometheus.io/path: /metrics
+    spec:
+      schedulerName: $sched
+      nodeSelector: {app: workload}
+      terminationGracePeriodSeconds: 5
+      containers:
+      - name: vllm
+        image: $SIM_IMAGE
+        env:
+        - {name: TWIN_MODEL, value: "$model"}
+        - {name: TWIN_MAX_MODEL_LEN, value: "8192"}
+        - {name: TWIN_SLOTS, value: "16"}
+        - {name: TWIN_KV_BLOCKS, value: "1024"}
+        - {name: TWIN_BLOCK_SIZE, value: "16"}
+        - {name: TWIN_PREFILL_OVERHEAD_MS, value: "30"}
+        - {name: TWIN_PREFILL_US_PER_TOKEN, value: "400"}
+        - {name: TWIN_ITL_MS, value: "10"}
+        - {name: TWIN_TIME_FACTOR_UNDER_LOAD, value: "1.5"}
+        - {name: POD_IP, valueFrom: {fieldRef: {fieldPath: status.podIP}}}
+        ports:
+        - {name: http, containerPort: $MODEL_PORT}
+        - {name: kv-events, containerPort: 20080}
+        - {name: kv-replay, containerPort: 20081}
+        resources:
+          requests: {cpu: 100m, memory: 384Mi}
+          limits: {cpu: "2", memory: 1Gi${gpu_res:+, $gpu_res}}
+        readinessProbe:
+          httpGet: {path: /health, port: $MODEL_PORT}
+          initialDelaySeconds: 3
+          periodSeconds: 5
+EOF
+  info "model $name in $ns: $replicas replica(s), image $SIM_IMAGE, model $model, scheduler $sched, ${annot:-${gpu_res:-no GPU}}"
+  if ! k rollout status -n "$ns" "deploy/$name" --timeout=300s >&2; then
+    k get pods -n "$ns" -l "app.kubernetes.io/name=$name" -o wide >&2 || true
+    k get events -n "$ns" --sort-by=.lastTimestamp 2>/dev/null | tail -8 >&2 || true
+    die "model $name did not become ready in $ns"
+  fi
+  local pods; pods="$(k get pods -n "$ns" -l "app.kubernetes.io/name=$name" -o json)"
+  if [ "$JSON" = 1 ]; then
+    jq -c --arg t "$tenant" --arg ns "$ns" '{tenant:$t, namespace:$ns, pods:[.items[] | {name:.metadata.name, node:.spec.nodeName,
+      scheduler:.spec.schedulerName, gpuFraction:(.metadata.annotations["gpu-fraction"] // null), phase:.status.phase}]}' <<<"$pods"
+  else
+    jq -r '.items[] | "  \(.metadata.name)  node=\(.spec.nodeName)  scheduler=\(.spec.schedulerName)  gpu-fraction=\(.metadata.annotations["gpu-fraction"] // "-")"' <<<"$pods"
+  fi
+}
+
+model_delete() {
+  local tenant="" name="model"
+  while [ $# -gt 0 ]; do case "$1" in --name) name="$2"; shift 2 ;; *) tenant="$1"; shift ;; esac; done
+  [ -n "$tenant" ] || die "usage: labctl model delete <tenant> [--name N]"
+  k delete deploy -n "$(require_ns "$tenant")" "$name" --ignore-not-found
+}
+
+# ------------------------------------------------------------------------------------- data plane
+cmd_vip() { [ -n "${1:-}" ] || die "usage: labctl vip <tenant>"; require_vip "$1"; }
+
+cmd_chat() {
+  local tenant="" prompt="" max=48
+  while [ $# -gt 0 ]; do
+    case "$1" in --max-tokens) max="$2"; shift 2 ;; --json) JSON=1; shift ;;
+      *) if [ -z "$tenant" ]; then tenant="$1"; else prompt="${prompt:+$prompt }$1"; fi; shift ;; esac
+  done
+  [ -n "$tenant" ] || die 'usage: labctl chat <tenant> "<prompt>"'
+  prompt="${prompt:-Say hello in five words.}"
+  local vip url model hdr body code
+  vip="$(require_vip "$tenant")"; url="http://$vip:$VIP_PORT"
+  model="$(curl -s -m 5 "$url/v1/models" 2>/dev/null | jq -r '.data[0].id // empty' 2>/dev/null || true)"
+  hdr="$(mktemp)"; body="$(mktemp)"
+  code="$(curl -s -m 60 -D "$hdr" -o "$body" -w '%{http_code}' "$url/v1/chat/completions" -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg m "$model" --arg p "$prompt" --argjson n "$max" \
+          '{messages:[{role:"user",content:$p}], max_tokens:$n} + (if $m=="" then {} else {model:$m} end)')")" || code=000
+  local tenant_hdr; tenant_hdr="$(tr -d '\r' <"$hdr" | awk -F': ' 'tolower($1)=="x-bnk-tenant"{print $2}' | tail -1)"
+  if [ "$JSON" = 1 ]; then
+    local bj; bj="$(jq -c . "$body" 2>/dev/null | head -1)"
+    jq -nc --arg c "$code" --arg t "$tenant_hdr" --arg vip "$vip" --argjson b "${bj:-null}" \
+      '{status:($c|tonumber), xBnkTenant:(if $t=="" then null else $t end), vip:$vip, body:$b}'
+  else
+    echo "POST $url/v1/chat/completions -> HTTP $code"
+    echo "X-BNK-Tenant: ${tenant_hdr:-<none>}"
+    if [ "$code" = 200 ]; then
+      jq -r '"model: \(.model)\nanswer: \(.choices[0].message.content // .choices[0].text // "" | gsub("\n";" ") | .[0:300])\nusage: prompt_tokens=\(.usage.prompt_tokens) completion_tokens=\(.usage.completion_tokens) total_tokens=\(.usage.total_tokens)"' "$body"
+    else
+      head -c 600 "$body"; echo
+    fi
+  fi
+  rm -f "$hdr" "$body"
+  [ "$code" = 200 ]
+}
+
+cmd_load() {
+  local profile="${1:-}"; shift || true
+  local tenant="tenant-a" seconds=30 extra=()
+  case "$profile" in steady|overload|prefix-heavy) ;; *) die "usage: labctl load steady|overload|prefix-heavy [--tenant T] [--seconds S] [--rps R]" ;; esac
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --tenant) tenant="$2"; shift 2 ;;
+      --seconds) seconds="$2"; shift 2 ;;
+      --rps|--max-tokens|--prefixes|--timeout|--concurrency) extra+=("$1" "$2"); shift 2 ;;
+      --json) extra+=(--json); shift ;;
+      *) die "unknown option $1" ;;
+    esac
+  done
+  need python3
+  local vip; vip="$(require_vip "$tenant")"
+  exec python3 "$LAB_ROOT/loadgen/loadgen.py" --url "http://$vip:$VIP_PORT" --profile "$profile" \
+    --seconds "$seconds" --label "$tenant" ${extra[@]+"${extra[@]}"}
+}
+
+# ------------------------------------------------------------------------------------- status/etc
+cmd_status() {
+  [ "${1:-}" = --json ] && JSON=1
+  local checks="[]"
+  add() { checks="$(jq -c --argjson a "$checks" --arg n "$1" --arg ok "$2" --arg d "$3" '$a + [{name:$n, ok:($ok=="1"), detail:$d}]' <<<'{}')"; }
+  local n r d
+  n="$(k get nodes --no-headers 2>/dev/null | grep -c ' Ready ' || true)"; add nodes "$([ "$n" -ge 4 ] && echo 1 || echo 0)" "$n Ready"
+  r="$(k get ds -n "$BNK_NS" f5-tmm -o jsonpath='{.status.numberReady}' 2>/dev/null || echo 0)"
+  add "bnk-tmm" "$([ "${r:-0}" -ge 1 ] && echo 1 || echo 0)" "f5-tmm ready=${r:-0}"
+  if ping -c1 -W1 10.1.10.201 >/dev/null 2>&1; then add "bnk-data-path" 1 "TMM external self-IP 10.1.10.201 answers"
+  else add "bnk-data-path" 0 "10.1.10.201 not answering (VIPs unreachable)"; fi
+  d="$(k get pods -n runai --no-headers 2>/dev/null | awk '$3!="Running" && $3!="Completed"{c++} END{print c+0" not running of "NR}')"
+  add "runai-cluster" "$([ "$(k get pods -n runai --no-headers 2>/dev/null | wc -l)" -gt 0 ] && [ "${d%% *}" = 0 ] && echo 1 || echo 0)" "runai: $d"
+  if [ ! -r "$RUNAI_CA_FILE" ]; then add "runai-api" 0 "lab CA $RUNAI_CA_FILE missing"
+  elif curl -s --cacert "$RUNAI_CA_FILE" -m 5 -o /dev/null "$RUNAI_URL"; then add "runai-api" 1 "$RUNAI_URL reachable (TLS verified)"
+  else add "runai-api" 0 "$RUNAI_URL unreachable or TLS not verified"; fi
+  n="$(k get nodes -o json 2>/dev/null | jq '[.items[].status.allocatable["nvidia.com/gpu"] // "0" | tonumber] | add // 0')"
+  add "fake-gpus" "$([ "${n:-0}" -gt 0 ] && echo 1 || echo 0)" "$n nvidia.com/gpu allocatable"
+  r="$(k get deploy -n "$TENANCY_NS" bnk-runai-tenancy -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)"
+  add "tenancy-controller" "$([ "${r:-0}" -ge 1 ] && echo 1 || echo 0)" "available=${r:-0}"
+  r="$(k get pods -A -l app.kubernetes.io/name=bnk-runai-meter --no-headers 2>/dev/null | grep -c Running || true)"
+  add "meter" "$([ "${r:-0}" -ge 1 ] && echo 1 || echo 0)" "running=${r:-0}"
+  r="$(k get pods -A -l app.kubernetes.io/part-of=model-server --no-headers 2>/dev/null | grep -c Running || true)"
+  add "model-servers" "$([ "${r:-0}" -ge 1 ] && echo 1 || echo 0)" "running=${r:-0}"
+  if curl -s -m 3 -o /dev/null "http://127.0.0.1:$GRAFANA_PORT/api/health"; then add grafana 1 ":$GRAFANA_PORT"; else add grafana 0 ":$GRAFANA_PORT not answering"; fi
+  local tenants; tenants="$(k get projects.kai.resources -o json 2>/dev/null | jq -c '[.items[] | {project:.metadata.name, phase:.status.phase}]' || echo '[]')"
+  if [ "$JSON" = 1 ]; then
+    jq -nc --argjson c "$checks" --argjson t "$tenants" '{ok: ($c | map(select(.name!="meter" and .name!="model-servers")) | all(.ok)), checks:$c, projects:$t}'
+  else
+    jq -r '.[] | "\(if .ok then "ok  " else "FAIL" end)  \(.name|.+"                    "|.[0:20]) \(.detail)"' <<<"$checks"
+    jq -r 'if length==0 then "      projects: none" else "      projects: " + (map("\(.project)(\(.phase // "-"))") | join(" ")) end' <<<"$tenants"
+  fi
+  jq -e 'map(select(.name!="meter" and .name!="model-servers")) | all(.ok)' <<<"$checks" >/dev/null
+}
+
+cmd_dash() {
+  local panel="${1:-}" host=control ip
+  ip="$(k get node control -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)"
+  local q="?orgId=1&refresh=5s"; [ -n "$panel" ] && q="$q&viewPanel=$panel"
+  echo "Grafana (Instruqt tab \"Grafana\", port $GRAFANA_PORT on the control node, anonymous viewer):"
+  echo "  http://$host:$GRAFANA_PORT/d/$DASH_UID/$DASH_UID$q"
+  [ -n "$ip" ] && echo "  http://$ip:$GRAFANA_PORT/d/$DASH_UID/$DASH_UID$q"
+}
+
+cmd_verify() {
+  local c="${1:-}" dir
+  [ -n "$c" ] || die "usage: labctl verify <challenge>  (e.g. 02)"
+  [[ "$c" =~ ^[0-9]$ ]] && c="0$c"
+  dir="$(find "$LAB_ROOT/instruqt" -mindepth 2 -maxdepth 2 -type d -name "${c}*" 2>/dev/null | sort | head -1)"
+  { [ -n "$dir" ] && [ -f "$dir/check-control" ]; } || die "no check script for challenge '$1'"
+  # Run the Instruqt check unchanged; fail-message is Instruqt's helper, shimmed here.
+  local shim; shim="$(mktemp -d)"
+  printf '#!/bin/sh\necho "FAIL: $*" >&2\n' >"$shim/fail-message"; chmod +x "$shim/fail-message"
+  if PATH="$shim:$PATH" bash "$dir/check-control"; then rm -rf "$shim"; echo "PASS: $(basename "$dir")"; return 0; fi
+  rm -rf "$shim"; echo "NOT YET: $(basename "$dir")" >&2; return 1
+}
+
+# ------------------------------------------------------------------------------------------- main
+main() {
+  local cmd="${1:-}"; shift || true
+  case "$cmd" in
+    status) cmd_status "$@" ;;
+    tenant)
+      local sub="${1:-}"; shift || true
+      case "$sub" in
+        create) tenant_create "$@" ;; delete) tenant_delete "$@" ;; show) tenant_show "$@" ;; list|ls) tenant_list "$@" ;;
+        *) die "usage: labctl tenant create|delete|show|list" ;;
+      esac ;;
+    model)
+      local sub="${1:-}"; shift || true
+      case "$sub" in deploy) model_deploy "$@" ;; delete) model_delete "$@" ;; *) die "usage: labctl model deploy|delete" ;; esac ;;
+    vip) cmd_vip "$@" ;;
+    chat) cmd_chat "$@" ;;
+    load) cmd_load "$@" ;;
+    dash) cmd_dash "$@" ;;
+    verify) cmd_verify "$@" ;;
+    routing) die "routing rr|epp is not available in this release: the tenancy controller owns each tenant's InferencePool and always wires the Endpoint Picker" ;;
+    -h|--help|help|"") usage ;;
+    *) usage >&2; exit 2 ;;
+  esac
+}
+main "$@"

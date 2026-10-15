@@ -11,8 +11,9 @@ spec:
   selector: {matchLabels: {app: dynamo-etcd}}
   template:
     metadata:
-      labels: {app: dynamo-etcd, app.kubernetes.io/part-of: dynamo-runtime}
+      labels: {app: dynamo-etcd, app.kubernetes.io/part-of: dynamo-runtime, kai.scheduler/queue: dynamo}
     spec:
+      schedulerName: kai-scheduler
       nodeSelector: {app: workload}
       containers:
       - name: etcd
@@ -51,14 +52,15 @@ spec:
   selector: {matchLabels: {app: dynamo-nats}}
   template:
     metadata:
-      labels: {app: dynamo-nats, app.kubernetes.io/part-of: dynamo-runtime}
+      labels: {app: dynamo-nats, app.kubernetes.io/part-of: dynamo-runtime, kai.scheduler/queue: dynamo}
     spec:
+      schedulerName: kai-scheduler
       nodeSelector: {app: workload}
       containers:
       - name: nats
         image: nats:2.11.4
         # JetStream on, as in upstream dev/docker-compose.yml; 8222 is the monitoring port.
-        args: ["-js", "-m", "8222", "--max_payload", "15728640"]
+        args: ["-js", "-m", "8222"]
         ports:
         - {name: client, containerPort: 4222}
         - {name: monitor, containerPort: 8222}

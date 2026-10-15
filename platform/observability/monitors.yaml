@@ -1,0 +1,143 @@
+# Scrape targets and recording rules for the "One Tenant, Two Planes" dashboard.
+# Prometheus (values.yaml) selects every ServiceMonitor/PodMonitor/PrometheusRule in the cluster.
+---
+# BNK <-> Run:ai tenancy controller: bnk_tenant_state, bnk_tenant_reconcile_seconds (controller/config/deploy.yaml).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: bnk-runai-tenancy
+  namespace: bnk-runai-tenancy
+  labels: {app.kubernetes.io/part-of: bnk-runai-lab}
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: bnk-runai-tenancy}
+  endpoints:
+    - {port: metrics, path: /metrics, interval: 5s}
+---
+# BNK token/request meter: bnk_requests_total, bnk_tokens_total (contracts/metrics.md). A PodMonitor, so
+# it works whether or not the meter ships a Service.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: bnk-runai-meter
+  namespace: bnk-runai-tenancy
+  labels: {app.kubernetes.io/part-of: bnk-runai-lab}
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: bnk-runai-meter}
+  podMetricsEndpoints:
+    - portNumber: 9100
+      path: /metrics
+      interval: 5s
+      # the meter's own project/department/model labels win over target labels
+      honorLabels: true
+---
+# Model servers (vllm-twin sims) in every Run:ai project namespace, deployed by `labctl model deploy`.
+# Each series gets project = the pod's tenancy.f5.com/project label, else the runai-<project> namespace.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: model-servers
+  namespace: monitoring
+  labels: {app.kubernetes.io/part-of: bnk-runai-lab}
+spec:
+  namespaceSelector: {any: true}
+  selector:
+    matchLabels: {app.kubernetes.io/part-of: model-server}
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: 5s
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_namespace]
+          regex: runai-(.+)
+          targetLabel: project
+          replacement: $1
+        - sourceLabels: [__meta_kubernetes_pod_label_tenancy_f5_com_project]
+          regex: (.+)
+          targetLabel: project
+          replacement: $1
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+        - sourceLabels: [__meta_kubernetes_pod_annotation_gpu_fraction]
+          targetLabel: gpu_fraction
+---
+# fake-gpu-operator status exporter: DCGM_FI_DEV_GPU_UTIL / FB_USED / FB_FREE per GPU, with the
+# namespace/pod of the workload on it (chart fake-gpu-operator 0.2.1, service nvidia-dcgm-exporter:9400).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: fake-gpu-dcgm-exporter
+  namespace: gpu-operator
+  labels: {app.kubernetes.io/part-of: bnk-runai-lab}
+spec:
+  selector:
+    matchLabels: {app: nvidia-dcgm-exporter}
+  endpoints:
+    - port: gpu-metrics
+      interval: 10s
+      honorLabels: true
+---
+# Run:ai's KAI queue controller (runai_queue_deserved_gpus, runai_queue_allocated_gpus, ...) and
+# scheduler (port http-metrics). The Run:ai operator may also create its own ServiceMonitor for the
+# queue controller; the dashboard aggregates with max(), so a second scrape is harmless.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: runai-kai
+  namespace: runai
+  labels: {app.kubernetes.io/part-of: bnk-runai-lab}
+spec:
+  selector:
+    matchExpressions:
+      # queue-controller; <schedulerName>-<shard> scheduler services (Run:ai sets schedulerName runai-scheduler)
+      - {key: app, operator: In, values: [queue-controller, runai-scheduler-default, kai-scheduler-default]}
+  endpoints:
+    - {port: metrics, interval: 15s, bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token}
+    - {port: http-metrics, interval: 15s}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: bnk-runai-lab
+  namespace: monitoring
+  labels: {app.kubernetes.io/part-of: bnk-runai-lab}
+spec:
+  groups:
+    - name: bnk-runai-lab.recording
+      interval: 5s
+      rules:
+        # Run:ai side: each project's GPU quota (sum over its node-pool queues), from kube-state-metrics'
+        # view of the kai.resources Project objects the tenancy controller reads.
+        - record: project:gpu_deserved:sum
+          expr: sum by (project, department) (max by (project, department, queue) (runai_project_gpu_deserved))
+        # Same quota as the Run:ai scheduler sees it (KAI queue controller, metrics namespace "runai").
+        - record: project:kai_gpu_deserved:sum
+          expr: sum by (project) (max by (project, queue_name) (runai_queue_deserved_gpus{project!=""}))
+        - record: project:kai_gpu_allocated:sum
+          expr: sum by (project) (max by (project, queue_name) (runai_queue_allocated_gpus{project!=""}))
+        - record: project:gpu_allocated:sum
+          expr: max by (project, department) (runai_project_gpu_allocated)
+        - record: department:gpu_deserved:sum
+          expr: sum by (department) (project:gpu_deserved:sum)
+        # BNK side: requests by response code and tokens by direction/source (contracts/metrics.md).
+        - record: project_code:bnk_requests:rate1m
+          expr: sum by (project, department, code) (rate(bnk_requests_total[1m]))
+        - record: project:bnk_tokens:rate1m
+          expr: sum by (project, department) (rate(bnk_tokens_total[1m]))
+        - record: project_source:bnk_tokens:rate1m
+          expr: sum by (project, source, direction) (rate(bnk_tokens_total[1m]))
+        # Fallback that needs no meter: tokens counted by the model servers themselves.
+        - record: project:model_tokens:rate1m
+          expr: |
+            sum by (project) (rate(vllm:prompt_tokens_total[1m]))
+            + sum by (project) (rate(vllm:generation_tokens_total[1m]))
+        # Tokens per GPU of quota: what one deserved GPU of each tenant turns into.
+        - record: project:bnk_tokens_per_gpu:rate1m
+          expr: |
+            sum by (project) (project:bnk_tokens:rate1m)
+            / on (project) clamp_min(sum by (project) (project:gpu_deserved:sum), 0.01)
+        - record: project:model_tokens_per_gpu:rate1m
+          expr: |
+            project:model_tokens:rate1m
+            / on (project) clamp_min(sum by (project) (project:gpu_deserved:sum), 0.01)
