@@ -84,6 +84,13 @@ provision_cluster_credentials
 
 step "Run:ai cluster chart (scheduler + resource management)"
 use_hub_registry deploy_runai_cluster
+# A release left by a failed install carries its old image names; its uninstall hooks would run
+# with them and hang. Remove it without hooks so NVIDIA's function starts from a clean slate.
+if helm -n runai status runai-cluster >/dev/null 2>&1 && \
+   [[ "$(helm -n runai status runai-cluster -o json | python3 -c 'import sys,json;print(json.load(sys.stdin)["info"]["status"])')" != deployed ]]; then
+  helm -n runai uninstall runai-cluster --no-hooks || true
+  kubectl -n runai delete job --all --wait=false || true
+fi
 deploy_runai_cluster
 
 step "fake GPUs on the gpu node"
