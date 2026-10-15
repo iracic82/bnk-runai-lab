@@ -10,4 +10,6 @@ helm upgrade --install dynamo-platform \
   --set global.nats.install=true \
   --wait --timeout 10m
 kubectl -n dynamo-system rollout status statefulset/dynamo-platform-nats --timeout=300s
+# NATS has no auth: only Dynamo tenant namespaces and dynamo-system may connect (see the file).
+kubectl apply -f "$(dirname "${BASH_SOURCE[0]}")/nats-policy.yaml"
 kubectl -n dynamo-system get pods

@@ -55,6 +55,8 @@ echo "namespace: $NS"
 say "Tell the tenancy controller this project runs NVIDIA Dynamo"
 kubectl annotate namespace "$NS" --overwrite \
   tenancy.f5.com/engine=dynamo tenancy.f5.com/dynamo-graph="$GRAPH"
+# The same marker as a label: Dynamo's NATS only accepts namespaces carrying it (nats-policy.yaml).
+kubectl label namespace "$NS" --overwrite tenancy.f5.com/engine=dynamo
 
 say "DynamoGraphDeployment $GRAPH"
 kubectl -n "$NS" create secret generic hf-token-secret --from-literal=HF_TOKEN="${HF_TOKEN:-}" \

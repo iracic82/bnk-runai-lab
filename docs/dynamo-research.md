@@ -101,3 +101,13 @@ Other facts from the live session:
   limited; the manifests read it optionally.
 - First pull of the planner image (≈ 0.67 GB compressed) on the gpu node; deploy.sh waits up to 15 min.
 - Project parent: deploy.sh uses the first existing `Department` (or `default`).
+
+## NATS access (shared event plane)
+
+Dynamo's NATS (dynamo-platform chart, `global.nats.install=true`) has no authentication, and every Dynamo
+tenant publishes its KV-cache events there. A pod that can reach it could read other tenants' prompt-block
+hashes or publish fake events that steer BNK's Endpoint Picker. `platform/dynamo/nats-policy.yaml` limits
+port 4222 to namespaces labelled `tenancy.f5.com/engine=dynamo` (the workers and the BNK picker, which the
+controller renders into the tenant namespace) and to `dynamo-system`. Tenants still share one NATS: a
+labelled tenant can see another Dynamo tenant's subjects. Per-tenant NATS accounts would close that and are
+not done in this lab.

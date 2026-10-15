@@ -197,6 +197,10 @@ step "labelling nodes: dpu runs TMM, gpu runs model pods (fake GPUs), runai runs
 # labelled app=workload instead, which is where the sims, Prometheus and Grafana land.
 kubectl label node dpu    app=f5-tmm  --overwrite
 kubectl label node gpu    app=workload run.ai/simulated-gpu-node-pool=default --overwrite
+# Keep platform pods (Run:ai backend, BNK control plane) off the model node: they filled its CPU to 98%.
+# PreferNoSchedule, not NoSchedule: the scheduler places them elsewhere when there is room, but no
+# DaemonSet or pod that lacks a toleration can end up Pending because of it. Models pin to app=workload.
+kubectl taint node gpu lab.f5.com/models-only=true:PreferNoSchedule --overwrite
 # The runai node adds capacity for the Run:ai control plane (about 50 services). It is not tainted:
 # the control plane's subcharts (Postgres, Keycloak, NATS) don't take a global toleration.
 kubectl label node runai  app=runai-control-plane --overwrite
