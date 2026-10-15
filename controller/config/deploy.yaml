@@ -1,0 +1,91 @@
+# BNK <-> Run:ai tenancy controller: one BNK tenant per Run:ai project.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bnk-runai-tenancy
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bnk-runai-tenancy
+  namespace: bnk-runai-tenancy
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bnk-runai-tenancy
+rules:
+  # Run:ai side: read projects/departments, own the finalizer.
+  - apiGroups: ["kai.resources"]
+    resources: ["projects", "departments"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # BNK side: the tenant objects it renders (Gateway API, GAIE, F5 EPP, iRule, NetPolicy).
+  - apiGroups: ["gateway.networking.k8s.io", "inference.networking.k8s.io", "inference.k8s.f5.com", "k8s.f5net.com", "gateway.k8s.f5.com"]
+    resources: ["gateways", "httproutes", "inferencepools", "f5epps", "f5bigcneirules", "netpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update"]
+  - apiGroups: ["", "events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bnk-runai-tenancy
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bnk-runai-tenancy
+subjects:
+  - kind: ServiceAccount
+    name: bnk-runai-tenancy
+    namespace: bnk-runai-tenancy
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bnk-runai-tenancy
+  namespace: bnk-runai-tenancy
+  labels: {app.kubernetes.io/name: bnk-runai-tenancy}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: bnk-runai-tenancy}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: bnk-runai-tenancy}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      serviceAccountName: bnk-runai-tenancy
+      nodeSelector: {app: runai-control-plane}
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: manager
+          image: docker.io/iracic82/bnk-runai-tenancy:0.1.0
+          args: ["--leader-elect", "--bnk-namespace=f5-bnk", "--vip-range=172.16.201.110-172.16.201.149"]
+          ports:
+            - {name: metrics, containerPort: 8080}
+            - {name: probes, containerPort: 8081}
+          livenessProbe: {httpGet: {path: /healthz, port: probes}}
+          readinessProbe: {httpGet: {path: /readyz, port: probes}}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, readOnlyRootFilesystem: true}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bnk-runai-tenancy-metrics
+  namespace: bnk-runai-tenancy
+  labels: {app.kubernetes.io/name: bnk-runai-tenancy}
+spec:
+  selector: {app.kubernetes.io/name: bnk-runai-tenancy}
+  ports: [{name: metrics, port: 8080, targetPort: metrics}]

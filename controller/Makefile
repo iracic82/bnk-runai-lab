@@ -1,8 +1,8 @@
 ENVTEST_K8S ?= 1.30.x
-IMG ?= bnk-runai-tenancy:dev
+IMG ?= docker.io/iracic82/bnk-runai-tenancy:0.1.0
 GOBIN := $(shell go env GOPATH)/bin
 
-.PHONY: build test envtest vet image
+.PHONY: build test envtest vet image push
 
 build:
 	go build -o bin/manager ./cmd/manager
@@ -20,3 +20,6 @@ envtest:
 
 image:
 	docker build --platform linux/amd64 -t $(IMG) .
+
+push: image
+	docker push $(IMG)
