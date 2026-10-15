@@ -48,12 +48,12 @@ step "clone dsx-ai-factory/run-ai @ ${RUNAI_REF}"
 if [ ! -d "$WORK/.git" ]; then
   git clone -q https://github.com/dsx-ai-factory/run-ai.git "$WORK"
 fi
-git -C "$WORK" fetch -q --depth 1 origin "$RUNAI_REF" 2>/dev/null || true
 git -C "$WORK" checkout -q "$RUNAI_REF"
 
 step "build + deploy with NVIDIA local-dev.sh (this is the long part)"
 cd "$WORK"
-PARALLEL_JOBS="$(nproc)" RUNAI_ADMIN_PASSWORD='Lab-Admin-1!' ./local-dev.sh 2>&1 | tee "$LOG"
+echo "cwd=$(pwd)"; ls -la "$WORK/local-dev.sh"
+PARALLEL_JOBS="$(nproc)" RUNAI_ADMIN_PASSWORD='Lab-Admin-1!' bash "$WORK/local-dev.sh" 2>&1 | tee "$LOG"
 
 step "smoke check: Run:ai pods"
 kubectl get pods -A --no-headers | awk '{print $4}' | sort | uniq -c
