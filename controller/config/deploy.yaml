@@ -53,7 +53,7 @@ rules:
   - apiGroups: [""]
     resources: ["configmaps"]
     resourceNames: ["bnk-runai-tenancy-vips"]
-    verbs: ["get", "list", "watch", "update"]
+    verbs: ["get", "update"]
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["create"]
@@ -94,7 +94,7 @@ spec:
       securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: manager
-          image: docker.io/iracic82/bnk-runai-tenancy:0.1.1
+          image: docker.io/iracic82/bnk-runai-tenancy:0.1.2
           imagePullPolicy: Always
           args: ["--leader-elect", "--bnk-namespace=f5-bnk", "--vip-range=172.16.201.110-172.16.201.149"]
           # Token metering (config/meter.yaml): add
