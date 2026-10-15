@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # labctl: the learner and check-script CLI for the BNK 2.4 x open-source NVIDIA Run:ai lab.
-# Contract: specs/001-bnk-runai-lab/contracts/labctl.md. Runs on the control node; cwd-independent.
+# Runs on the control node; cwd-independent. Commands: labctl help.
 #
 # Run:ai projects and departments are created through the Run:ai REST API (https://runai.lab), the way
 # the Run:ai UI does it. A direct `kubectl apply` of a kai.resources Project is refused by Run:ai's

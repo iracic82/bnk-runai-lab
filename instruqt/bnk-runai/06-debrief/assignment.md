@@ -55,8 +55,9 @@ One last look at the whole thing, from both sides:
 
 ```bash,run
 labctl status
-kubectl get projects.kai.resources -o custom-columns='PROJECT:.metadata.name,DEPARTMENT:.spec.parent,NAMESPACE:.status.namespace,TOKENS:.metadata.annotations.tenancy\.f5\.com/tokens-total'
-kubectl get gateway -n f5-bnk -L tenancy.f5.com/project,tenancy.f5.com/department
+kubectl get projects.kai.resources -o custom-columns='PROJECT:.metadata.name,DEPARTMENT:.spec.parent,NAMESPACE:.status.namespace,PHASE:.status.phase'
+kubectl get gateway -n f5-bnk -o wide -L tenancy.f5.com/project
+kubectl -n bnk-runai-tenancy get cm bnk-runai-usage -o jsonpath='{.data}' | jq .
 ```
 
 # What is real, and what is simulated

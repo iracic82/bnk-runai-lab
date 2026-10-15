@@ -1,0 +1,97 @@
+{{- if .Values.metering.enabled }}
+{{- $name := include "bnk-runai-tenancy.meterName" . -}}
+# Token meter: collects the usage lines the tenant iRules record at the BNK front door, exports them on
+# /metrics and keeps per-project token totals (rolled up per Department) in the bnk-runai-usage ledger.
+# Every flushInterval it sends GET /bnk/flush to each tenant Gateway VIP; the iRule answers 204 and sends
+# its parked lines over TCP from TMM to metering.sink, the control node's IP (hostNetwork below). TMM
+# connects from its own network, so a ClusterIP is not reachable from the iRule.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bnk-runai-tenancy.meterLabels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # One listener per host port; Recreate frees the usage port before the new pod binds it.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      {{- include "bnk-runai-tenancy.meterSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "bnk-runai-tenancy.meterLabels" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.meter.metricsPort | quote }}
+        {{- with .Values.meter.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ $name }}
+      # TMM sends usage to the control node's own IP, so the meter listens on the host network there.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- with .Values.meter.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.meter.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.meter.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.meter.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: meter
+          image: {{ include "bnk-runai-tenancy.image" .Values.meter.image | quote }}
+          imagePullPolicy: {{ .Values.meter.image.pullPolicy }}
+          args:
+            - --listen=:{{ .Values.meter.usagePort }}
+            - --metrics-bind-address=:{{ .Values.meter.metricsPort }}
+            # TMM self-IP(s) on the internal VLAN (add the TMM pod CIDR if TMM's sideband connections
+            # are sourced from it).
+            - --allowed-peers={{ .Values.metering.allowedPeers }}
+            - --metering-token-file=/var/run/bnk-metering/token
+            - --bnk-namespace={{ .Values.bnk.namespace }}
+            - --flush-interval={{ .Values.metering.flushInterval }}
+            - --writeback-interval={{ .Values.metering.writebackInterval }}
+            - --ledger-namespace={{ .Release.Namespace }}
+            {{- with .Values.meter.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - {name: usage, containerPort: {{ .Values.meter.usagePort }}, hostPort: {{ .Values.meter.usagePort }}, protocol: TCP}
+            - {name: metrics, containerPort: {{ .Values.meter.metricsPort }}, hostPort: {{ .Values.meter.metricsPort }}, protocol: TCP}
+          livenessProbe: {httpGet: {path: /healthz, port: {{ .Values.meter.metricsPort }}}}
+          readinessProbe: {httpGet: {path: /healthz, port: {{ .Values.meter.metricsPort }}}}
+          volumeMounts:
+            - {name: token, mountPath: /var/run/bnk-metering, readOnly: true}
+          resources:
+            {{- toYaml .Values.meter.resources | nindent 12 }}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, readOnlyRootFilesystem: true}
+      volumes:
+        - name: token
+          secret: {secretName: {{ include "bnk-runai-tenancy.meteringSecretName" . }}, items: [{key: token, path: token}]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bnk-runai-tenancy.meterLabels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "bnk-runai-tenancy.meterSelectorLabels" . | nindent 4 }}
+  ports: [{name: metrics, port: {{ .Values.meter.metricsPort }}, targetPort: {{ .Values.meter.metricsPort }}}]
+{{- end }}

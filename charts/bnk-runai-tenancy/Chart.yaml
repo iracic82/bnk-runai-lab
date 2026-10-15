@@ -1,0 +1,17 @@
+apiVersion: v2
+name: bnk-runai-tenancy
+description: >-
+  One F5 BIG-IP Next for Kubernetes (BNK) tenant per NVIDIA Run:ai project. The controller turns each
+  Run:ai project into a BNK Gateway, HTTPRoute, InferencePool, Endpoint Picker, rate-limit iRule and
+  NetPolicy; the optional meter collects per-project token usage from the BNK front door.
+type: application
+version: 0.1.0
+appVersion: "0.1.6"
+keywords:
+  - run:ai
+  - bnk
+  - f5
+  - nvidia
+  - gateway-api
+annotations:
+  licenses: Apache-2.0

@@ -1,0 +1,95 @@
+{{- $name := include "bnk-runai-tenancy.name" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bnk-runai-tenancy.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.controller.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "bnk-runai-tenancy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "bnk-runai-tenancy.labels" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        {{- with .Values.controller.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ $name }}
+      {{- with .Values.controller.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: manager
+          image: {{ include "bnk-runai-tenancy.image" .Values.controller.image | quote }}
+          imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+          args:
+            {{- if .Values.controller.leaderElect }}
+            - --leader-elect
+            {{- end }}
+            - --bnk-namespace={{ .Values.bnk.namespace }}
+            - --vip-range={{ .Values.vipRange }}
+            - --gateway-class={{ .Values.bnk.gatewayClass }}
+            - --tokenizer={{ .Values.bnk.tokenizer }}
+            - --pull-secret={{ .Values.bnk.pullSecret }}
+            - --base-rps={{ .Values.policy.baseRPS }}
+            - --min-gpu-factor={{ .Values.policy.minGPUFactor }}
+            - --critical-priority-threshold={{ int .Values.policy.criticalPriorityThreshold }}
+            {{- if .Values.metering.enabled }}
+            # Token metering: the iRules send usage from TMM to the meter on the control node.
+            - --metering-sink={{ required "metering.sink is required when metering.enabled=true" .Values.metering.sink }}
+            - --metering-token-file=/var/run/bnk-metering/token
+            {{- end }}
+            {{- with .Values.controller.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.metering.enabled }}
+          volumeMounts:
+            - {name: metering-token, mountPath: /var/run/bnk-metering, readOnly: true}
+          {{- end }}
+          ports:
+            - {name: metrics, containerPort: 8080}
+            - {name: probes, containerPort: 8081}
+          livenessProbe: {httpGet: {path: /healthz, port: probes}}
+          readinessProbe: {httpGet: {path: /readyz, port: probes}}
+          resources:
+            {{- toYaml .Values.controller.resources | nindent 12 }}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, readOnlyRootFilesystem: true}
+      {{- if .Values.metering.enabled }}
+      volumes:
+        - name: metering-token
+          secret: {secretName: {{ include "bnk-runai-tenancy.meteringSecretName" . }}, items: [{key: token, path: token}]}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bnk-runai-tenancy.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "bnk-runai-tenancy.selectorLabels" . | nindent 4 }}
+  ports: [{name: metrics, port: 8080, targetPort: metrics}]

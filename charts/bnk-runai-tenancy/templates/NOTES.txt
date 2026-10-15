@@ -1,0 +1,29 @@
+bnk-runai-tenancy {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
+Every Run:ai project becomes one BNK tenant in namespace {{ .Values.bnk.namespace }}.
+
+1. Check the controller{{ if .Values.metering.enabled }} and the meter{{ end }}:
+
+     kubectl -n {{ .Release.Namespace }} get deploy,pods -l app.kubernetes.io/part-of=bnk-runai-tenancy
+     kubectl -n {{ .Release.Namespace }} logs deploy/bnk-runai-tenancy
+
+2. Create projects through the Run:ai API or UI, not kubectl: Run:ai's admission webhook only lets
+   Run:ai's own services write kai.resources projects/departments.
+
+3. Each project's tenant Gateway should appear and become Programmed:
+
+     kubectl get gateways -n {{ .Values.bnk.namespace }} -l tenancy.f5.com/project
+     kubectl get f5-big-cne-irules,netpolicies -n {{ .Values.bnk.namespace }}
+     kubectl get configmap bnk-runai-tenancy-vips -n {{ .Values.bnk.namespace }} -o yaml   # VIP allocations
+
+   Deleting the project in Run:ai removes its BNK objects.
+{{- if .Values.metering.enabled }}
+
+4. Token metering: TMM sends usage to {{ .Values.metering.sink }}; only {{ .Values.metering.allowedPeers | default "(nobody: allowedPeers is empty)" }} may connect.
+
+     kubectl -n {{ .Release.Namespace }} logs deploy/bnk-runai-meter
+     kubectl -n {{ .Release.Namespace }} get configmap bnk-runai-usage -o yaml   # per-project token totals
+{{- if not .Values.metering.token.existingSecret }}
+
+   The shared token was generated into Secret bnk-metering-token (kept across upgrades and uninstall).
+{{- end }}
+{{- end }}

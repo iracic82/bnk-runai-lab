@@ -1,0 +1,96 @@
+{{- $name := include "bnk-runai-tenancy.name" . -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bnk-runai-tenancy.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bnk-runai-tenancy.labels" . | nindent 4 }}
+rules:
+  # Run:ai side: read only. Run:ai's webhook lets only Run:ai's own services write projects.
+  - apiGroups: ["kai.resources"]
+    resources: ["projects", "departments"]
+    verbs: ["get", "list", "watch"]
+  # BNK side: the tenant objects it renders (Gateway API, GAIE, F5 EPP, iRule, NetPolicy).
+  - apiGroups: ["gateway.networking.k8s.io", "inference.networking.k8s.io", "inference.k8s.f5.com", "k8s.f5net.com", "gateway.k8s.f5.com"]
+    resources: ["gateways", "httproutes", "inferencepools", "f5-epps", "f5-big-cne-irules", "netpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  {{- if .Values.bnk.pullSecret }}
+  # BNK's registry credential, copied into each tenant namespace for its Endpoint Picker.
+  # Create/patch is cluster-wide because Run:ai creates tenant namespaces at runtime; the controller
+  # only ever writes the one secret name, labelled managed-by bnk-runai-tenancy.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ .Values.bnk.pullSecret | quote }}]
+    verbs: ["get", "patch", "delete"]
+  {{- end }}
+  - apiGroups: ["", "events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bnk-runai-tenancy.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+# The VIP map is the only ConfigMap the controller touches: namespaced, not cluster-wide.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-vips
+  namespace: {{ .Values.bnk.namespace }}
+  labels:
+    {{- include "bnk-runai-tenancy.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["bnk-runai-tenancy-vips"]
+    verbs: ["get", "update"]
+  {{- if .Values.bnk.pullSecret }}
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ .Values.bnk.pullSecret | quote }}]
+    verbs: ["get"]
+  {{- end }}
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-vips
+  namespace: {{ .Values.bnk.namespace }}
+  labels:
+    {{- include "bnk-runai-tenancy.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-vips
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}

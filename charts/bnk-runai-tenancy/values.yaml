@@ -1,0 +1,112 @@
+# Default values for bnk-runai-tenancy. The defaults reproduce controller/config/deploy.yaml and
+# controller/config/meter.yaml, the manifests verified live on BNK 2.4 + open-source Run:ai.
+#
+# Install into its own namespace (the chart does not create it):
+#   helm install bnk-runai-tenancy charts/bnk-runai-tenancy -n bnk-runai-tenancy --create-namespace
+
+controller:
+  image:
+    repository: docker.io/iracic82/bnk-runai-tenancy
+    tag: "0.1.6"
+    pullPolicy: Always
+  # One active controller; extra replicas wait on the leader-election Lease.
+  replicaCount: 1
+  # --leader-elect
+  leaderElect: true
+  # Run the controller next to the Run:ai control plane (node label set by platform/cluster setup).
+  nodeSelector:
+    app: runai-control-plane
+  tolerations: []
+  affinity: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  # Extra container args appended verbatim (e.g. ["--dry-run", "--zap-log-level=debug"]).
+  extraArgs: []
+  imagePullSecrets: []
+  podAnnotations: {}
+
+bnk:
+  # --bnk-namespace: where BNK's Gateways, iRules and NetPolicies live. The chart also puts the Roles for
+  # the VIP ConfigMap, the pull secret and (with metering) the meter's Gateway list into this namespace.
+  namespace: f5-bnk
+  # --gateway-class: the GatewayClass served by BNK (controllerName f5.com/f5-bnk-f5-cne-controller).
+  gatewayClass: f5-gateway-class
+  # --tokenizer: tokenizer for the Endpoint Picker's prefix-cache scorer.
+  tokenizer: NousResearch/Meta-Llama-3.1-8B-Instruct
+  # --pull-secret: BNK registry secret (in bnk.namespace) copied into each tenant namespace for its
+  # Endpoint Picker. Empty: don't copy, and the chart grants no secret access at all.
+  pullSecret: far-pull-secret
+
+# --vip-range: addresses tenant Gateways are served from (allocations kept in ConfigMap
+# bnk-runai-tenancy-vips in bnk.namespace).
+vipRange: 172.16.201.110-172.16.201.149
+
+# Quota -> rate limit: rps = baseRPS x max(gpuDeserved, minGPUFactor). A tenancy.f5.com/rps annotation
+# on the Run:ai project wins.
+policy:
+  # --base-rps: requests/s per deserved GPU
+  baseRPS: 20
+  # --min-gpu-factor: GPU floor for projects without a GPU quota
+  minGPUFactor: 0.25
+  # --critical-priority-threshold: Run:ai queue priority that maps to Critical
+  criticalPriorityThreshold: 100
+
+metering:
+  # Token metering: the tenant iRules send usage from TMM to the meter on the control node.
+  # false: no meter resources, no token Secret, and no metering flags/volume on the controller.
+  enabled: true
+  # Controller --metering-sink: IP:port TMM sends usage lines to. The meter listens on the host network
+  # of a control-plane node, so this is that node's IP on TMM's external network.
+  sink: "10.1.10.11:5514"
+  # Meter --allowed-peers: comma-separated IPs/CIDRs allowed to send usage (TMM self-IPs). Empty rejects all.
+  allowedPeers: "10.1.10.201"
+  # Meter --flush-interval: how often each tenant iRule is asked to send its usage.
+  flushInterval: 5s
+  # Meter --writeback-interval: how often token totals are written to the bnk-runai-usage ledger.
+  writebackInterval: 30s
+  token:
+    # Name of an existing Secret (in the release namespace) holding the shared token under key "token".
+    # Empty: the chart creates Secret bnk-metering-token with a random 32-character alphanumeric token and
+    # keeps it across upgrades (looked up from the cluster).
+    existingSecret: ""
+
+meter:
+  image:
+    repository: docker.io/iracic82/bnk-runai-meter
+    tag: "0.1.1"
+    pullPolicy: IfNotPresent
+  # --listen port (also the hostPort TMM connects to).
+  usagePort: 5514
+  # --metrics-bind-address port (also a hostPort).
+  metricsPort: 9100
+  # TMM sends usage to the control node's own IP, so the meter runs there on the host network.
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: ""
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+    - key: node-role.kubernetes.io/master
+      operator: Exists
+      effect: NoSchedule
+  affinity: {}
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  extraArgs: []
+  imagePullSecrets: []
+  podAnnotations: {}
+
+# Prometheus Operator monitors (needs the monitoring.coreos.com CRDs). The pods also carry
+# prometheus.io/scrape annotations for annotation-based scraping.
+monitoring:
+  enabled: false
+  interval: 5s
+  labels: {}

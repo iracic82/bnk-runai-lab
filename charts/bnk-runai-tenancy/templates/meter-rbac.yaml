@@ -1,0 +1,103 @@
+{{- if .Values.metering.enabled }}
+{{- $name := include "bnk-runai-tenancy.meterName" . -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bnk-runai-tenancy.meterLabels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bnk-runai-tenancy.meterLabels" . | nindent 4 }}
+rules:
+  # Read-only on Run:ai: Run:ai's webhook lets only Run:ai's own services write projects/departments.
+  # Totals go to the bnk-runai-usage ledger; TokensMetered Events are attached to the Run:ai objects.
+  - apiGroups: ["kai.resources"]
+    resources: ["projects", "departments"]
+    verbs: ["get", "list"]
+  - apiGroups: ["", "events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bnk-runai-tenancy.meterLabels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+# Token ledger: one ConfigMap in the meter's own namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-ledger
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bnk-runai-tenancy.meterLabels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["bnk-runai-usage"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-ledger
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bnk-runai-tenancy.meterLabels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-ledger
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+# Flush: find the tenant Gateway VIPs. Read-only, BNK namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-gateways
+  namespace: {{ .Values.bnk.namespace }}
+  labels:
+    {{- include "bnk-runai-tenancy.meterLabels" . | nindent 4 }}
+rules:
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-gateways
+  namespace: {{ .Values.bnk.namespace }}
+  labels:
+    {{- include "bnk-runai-tenancy.meterLabels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-gateways
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

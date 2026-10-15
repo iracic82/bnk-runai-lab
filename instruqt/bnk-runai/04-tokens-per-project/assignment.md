@@ -92,22 +92,26 @@ That last panel is the question a platform team gets asked: is `tenant-a`'s 2-GP
 its keep compared with `tenant-b`'s half GPU? Before this, answering it meant joining scheduler data
 with gateway logs by hand.
 
-# Step 4: The totals land back in Run:ai
+# Step 4: The totals are reported against Run:ai
 
-The meter writes each project's running total onto the Run:ai Project itself:
-
-```bash,run
-kubectl get projects.kai.resources tenant-a -o jsonpath='{.metadata.annotations}' | jq 'with_entries(select(.key|startswith("tenancy.f5.com")))'
-kubectl get projects.kai.resources tenant-a -o jsonpath='{.metadata.annotations.tenancy\.f5\.com/tokens-total}{"\n"}'
-```
-
-And rolls them up into the department, `acme`:
+Run:ai lets only its own services write projects, so the meter keeps the durable totals in a usage
+ledger and posts them as events on each Run:ai project and department, where any Run:ai admin sees them:
 
 ```bash,run
-kubectl get departments.kai.resources acme -o jsonpath='{.metadata.annotations.tenancy\.f5\.com/tokens-total}{"\n"}'
+kubectl -n bnk-runai-tenancy get cm bnk-runai-usage -o jsonpath='{.data}' | jq .
+kubectl get events -A --field-selector reason=TokensMetered \
+  -o custom-columns='KIND:.involvedObject.kind,NAME:.involvedObject.name,MESSAGE:.message' | tail -6
 ```
 
-Anything that already reads Run:ai objects, a chargeback script or an admin view, can now see token
-use without learning about BNK or Prometheus.
+`project.tenant-a` and `project.tenant-b` are each project's running total. `department.default` is
+their sum: the department roll-up. Compare the ledger with the meter's own counters:
+
+```bash,run
+M=$(kubectl get node control -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
+curl -s http://$M:9100/metrics | grep -E '^bnk_tokens_total' | grep -v 'model="none"'
+```
+
+Prompt plus completion for a project adds up to its ledger total, within one 30-second write. A
+chargeback script or an admin view can read this without learning about BNK or Prometheus.
 
 Click **Check** once tenant-a has a token total.
