@@ -114,6 +114,25 @@ func (a *Applier) vipFor(ctx context.Context, project string) (netip.Addr, error
 		if err != nil {
 			return err
 		}
+		// Live Gateways are the ground truth: if the ConfigMap was lost or edited, an address a
+		// Gateway still holds is never handed to anyone else, and a project keeps its own.
+		live, err := a.liveVIPs(ctx)
+		if err != nil {
+			return err
+		}
+		for ip, owner := range live {
+			if owner == project {
+				out = ip
+				if cm.Data == nil {
+					cm.Data = map[string]string{}
+				}
+				if cm.Data[ip.String()] != project {
+					cm.Data[ip.String()] = project
+					return a.Client.Update(ctx, cm)
+				}
+				return nil
+			}
+		}
 		for k, v := range cm.Data {
 			if v == project {
 				ip, err := netip.ParseAddr(k)
@@ -125,6 +144,9 @@ func (a *Applier) vipFor(ctx context.Context, project string) (netip.Addr, error
 		}
 		now := time.Now()
 		for _, ip := range a.VIPs {
+			if _, inUse := live[ip]; inUse {
+				continue
+			}
 			v, taken := cm.Data[ip.String()]
 			if taken && !releasedLongAgo(v, now) {
 				continue
@@ -139,6 +161,31 @@ func (a *Applier) vipFor(ctx context.Context, project string) (netip.Addr, error
 		return fmt.Errorf("no free tenant VIP left in the pool (%d addresses, released ones are held for %s)", len(a.VIPs), VIPHold)
 	})
 	return out, err
+}
+
+// liveVIPs maps every address a managed tenant Gateway serves to that Gateway's project.
+func (a *Applier) liveVIPs(ctx context.Context) (map[netip.Addr]string, error) {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(GatewayGVK.GroupVersion().WithKind("GatewayList"))
+	err := a.Client.List(ctx, list, client.InNamespace(a.Config.Namespace), client.MatchingLabels{LabelManagedBy: ManagedBy})
+	if meta.IsNoMatchError(err) {
+		return map[netip.Addr]string{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list tenant gateways: %w", err)
+	}
+	out := map[netip.Addr]string{}
+	for _, gw := range list.Items {
+		addrs, _, _ := unstructured.NestedSlice(gw.Object, "spec", "addresses")
+		for _, raw := range addrs {
+			m, _ := raw.(map[string]any)
+			v, _ := m["value"].(string)
+			if ip, err := netip.ParseAddr(v); err == nil {
+				out[ip] = gw.GetLabels()[LabelProject]
+			}
+		}
+	}
+	return out, nil
 }
 
 func (a *Applier) releaseVIP(ctx context.Context, project string) error {

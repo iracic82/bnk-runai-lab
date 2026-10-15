@@ -122,6 +122,28 @@ func TestReleasedVIPIsHeldBack(t *testing.T) {
 	}
 }
 
+// If the VIP ConfigMap is lost, addresses held by live Gateways must still never be reused.
+func TestLostVIPMapDoesNotReuseLiveAddress(t *testing.T) {
+	a := newApplier(t, 2)
+	ctx := context.Background()
+	ipA, _ := a.vipFor(ctx, "tenant-a")
+	gw := Render(a.Config, desired("tenant-a", "runai-tenant-a", 40), ipA.String())[0]
+	if err := a.Client.Create(ctx, gw); err != nil {
+		t.Fatal(err)
+	}
+	cm, _ := a.vipMap(ctx)
+	if err := a.Client.Delete(ctx, cm); err != nil {
+		t.Fatal(err)
+	}
+	ipB, err := a.vipFor(ctx, "tenant-b")
+	if err != nil || ipB == ipA {
+		t.Fatalf("tenant-b got %v (err %v); %v is still served by tenant-a's gateway", ipB, err, ipA)
+	}
+	if again, _ := a.vipFor(ctx, "tenant-a"); again != ipA {
+		t.Errorf("tenant-a must keep its live address %v, got %v", ipA, again)
+	}
+}
+
 func TestApplyRefusesForeignObjects(t *testing.T) {
 	a := newApplier(t, 1)
 	ctx := context.Background()
