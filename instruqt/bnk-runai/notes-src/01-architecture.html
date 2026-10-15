@@ -1,0 +1,40 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0}
+body{width:1400px;height:530px;background:#fff;font-family:Inter,Helvetica,Arial,sans-serif;color:#151a22;padding:26px 30px}
+.layer{border:1px solid #d6dbe1;border-radius:10px;overflow:hidden;margin-bottom:10px}
+.head{display:flex;justify-content:space-between;align-items:center;padding:8px 14px}
+.head b{font-size:14px;letter-spacing:.05em;text-transform:uppercase}
+.vm{font:500 12px 'IBM Plex Mono',monospace;border:1px solid currentColor;border-radius:999px;padding:2px 9px}
+.cells{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.cell{padding:10px 14px;border-left:1px solid #e3e6ea}.cell:first-child{border-left:0}
+.cell b{display:block;font-size:14px;margin-bottom:2px}.cell span{font-size:12.5px;color:#5d6470}
+.cp{border-color:#76b900}.cp .head{background:#a9d46b}.cp .cells{background:#eef6e2}
+.f5{border:2px solid #e4002b}.f5 .head{background:#e4002b;color:#fff}.f5 .cells{background:#fde8ec}.f5 .cell b{color:#8f0019}
+.cs{background:#3a3a3a;border-color:#3a3a3a}.cs .head{color:#fff}.cs .cell{border-color:#555}.cs .cell b{color:#fff}.cs .cell span{color:#c9c9c9}
+.gpu{border-color:#76b900}.gpu .head{background:#eef6e2;color:#2f4a05}
+.bridge{background:#fff6dc;border:1.5px dashed #d9a400;border-radius:10px;padding:9px 14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;font-size:13.5px}
+.sim{font:500 11px 'IBM Plex Mono',monospace;color:#5d6470;border:1px dashed #8a929e;border-radius:4px;padding:1px 5px;margin-left:5px}
+.new{font:600 10px 'IBM Plex Mono',monospace;background:#e4002b;color:#fff;border-radius:4px;padding:2px 6px;margin-left:6px}
+</style></head><body>
+<div class="layer cp"><div class="head"><b>Run:ai control plane</b><span class="vm">node: runai</span></div><div class="cells">
+<div class="cell"><b>Projects &amp; departments</b><span>the tenant is defined here, once</span></div>
+<div class="cell"><b>Quotas &amp; priority</b><span>GPU share per project</span></div>
+<div class="cell"><b>Workloads</b><span>deploy and track inference</span></div>
+<div class="cell"><b>UI &middot; CLI &middot; API</b><span>what admins and ML engineers use</span></div></div></div>
+<div class="bridge"><div><b>BNK &harr; Run:ai tenancy controller</b><span class="new">OPEN SOURCE</span>&nbsp; reads every Run:ai project, writes its BNK config</div><span class="vm">node: control</span></div>
+<div class="layer f5"><div class="head"><b>F5 BNK 2.4 &middot; AI factory service plane</b><span class="vm" style="color:#fff">node: dpu <span style="opacity:.8">(BlueField simulated)</span></span></div><div class="cells">
+<div class="cell"><b>Front door per tenant</b><span>one hostname per Run:ai project</span></div>
+<div class="cell"><b>Rate limit</b><span>from the project's GPU quota</span></div>
+<div class="cell"><b>Endpoint Picker</b><span>best replica, by KV cache and queue</span></div>
+<div class="cell"><b>Metering</b><span>tokens per project</span></div></div></div>
+<div class="layer cs"><div class="head"><b>Run:ai cluster services</b><span class="vm" style="color:#c9c9c9">node: gpu</span></div><div class="cells">
+<div class="cell"><b>Run:ai Scheduler</b><span>fair share, preemption, GPU fractions</span></div>
+<div class="cell"><b>Resource management</b><span>project &rarr; namespace</span></div>
+<div class="cell"><b>Operators</b><span>reconcile projects &amp; workloads</span></div></div></div>
+<div class="layer gpu"><div class="head"><b>GPU infrastructure</b><span class="vm">node: gpu</span></div><div class="cells">
+<div class="cell"><b>4 &times; A10 <span class="sim">simulated</span></b><span>NVIDIA fake-gpu-operator</span></div>
+<div class="cell"><b>Model servers <span class="sim">simulated</span></b><span>vLLM simulator, 0.5 GPU each</span></div>
+<div class="cell"><b>DPU &rarr; GPU link</b><span>gretap "pcie" tunnel</span></div></div></div>
+</body></html>

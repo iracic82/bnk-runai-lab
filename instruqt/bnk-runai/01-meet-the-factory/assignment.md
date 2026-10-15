@@ -1,26 +1,29 @@
 ---
 slug: meet-the-factory
-id: ""
+id: pwzmtvaqmzpb
 type: challenge
 title: Meet the AI factory
-teaser: A real Kubernetes cluster with BNK 2.4 and open-source NVIDIA Run:ai. The GPUs are simulated.
+teaser: A real Kubernetes cluster with BNK 2.4 and open-source NVIDIA Run:ai. The
+  GPUs are simulated.
 notes:
-- type: text
-  contents: |-
-    Four nodes. **control** runs Kubernetes and your terminal. **dpu** stands in for a BlueField DPU
-    and runs BNK's data plane. **gpu** has four simulated A10 GPUs where Run:ai places models.
-    **runai** runs the Run:ai control plane.
-
-    Every request will enter through BNK on the dpu node and cross a tunnel to the gpu node, the same
-    path it takes on real hardware.
+- type: image
+  url: ../assets/notes-01-hero.png
+- type: image
+  url: ../assets/notes-01-real.png
 tabs:
-- id: ""
+- id: leytwskwjamw
   title: Terminal
   type: terminal
   hostname: control
 difficulty: basic
 timelimit: 1800
+enhanced_loading: null
 ---
+Here is the stack you are about to explore. NVIDIA's Run:ai layers are in green and grey, the F5
+layer in red, and the controller that joins them in yellow. Each layer shows the node it runs on.
+
+![BNK in the Run:ai architecture](../assets/01-architecture.png)
+
 # The cluster
 
 ```bash

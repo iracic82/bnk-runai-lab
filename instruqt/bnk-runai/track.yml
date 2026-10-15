@@ -1,6 +1,8 @@
 slug: bnk-runai
+id: gfxdjnl0pxc8
 title: BNK 2.4 with open-source NVIDIA Run:ai
-teaser: "Define a tenant once in Run:ai and BNK serves, limits and meters it. Real BNK 2.4 and open-source Run:ai, simulated GPUs."
+teaser: Define a tenant once in Run:ai and BNK serves, limits and meters it. Real
+  BNK 2.4 and open-source Run:ai, simulated GPUs.
 description: |-
   **One tenant model for the whole AI factory.**
 
@@ -13,6 +15,7 @@ description: |-
   hardware is simulated. GPUs come from NVIDIA's fake-gpu-operator and the models are vLLM simulators.
   The BlueField DPU is simulated as a separate node with a tunnel to the GPU node, so the request path is
   the real one, but DPU offload itself is not measured here.
+icon: ""
 tags:
 - runai
 - bnk
@@ -32,3 +35,5 @@ lab_config:
   feedback_tab_enabled: false
   loadingMessages: true
   hideStopButton: false
+checksum: "15744056571577771192"
+enhanced_loading: false
