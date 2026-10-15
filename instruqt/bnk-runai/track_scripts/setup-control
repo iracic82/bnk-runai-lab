@@ -32,6 +32,7 @@ step() { echo "==== $(date +%H:%M:%S) $*"; }
     kubectl -n bnk-runai-tenancy create secret generic bnk-metering-token \
       --from-literal=token="$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32)"
   step "tenancy controller + token meter"
+  kubectl apply -f "$LAB_ROOT/controller/config/secret-policy.yaml"
   kubectl apply -f "$LAB_ROOT/controller/config/deploy.yaml"
   kubectl apply -f "$LAB_ROOT/controller/config/meter.yaml"
   kubectl -n bnk-runai-tenancy rollout status deploy/bnk-runai-tenancy --timeout=300s
