@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Deploy NVIDIA Dynamo (frontend + Mocker workers) as a Run:ai project, served behind BNK 2.4.
+# Deploy NVIDIA Dynamo (frontend + 2 Mocker workers) as a Run:ai project, behind BNK 2.4 with BNK's
+# Endpoint Picker in Dynamo mode: BNK picks the Dynamo worker from Dynamo's own KV-cache events.
 #
-#   deploy.sh          aggregated: 1 frontend + 2 Mocker decode workers (default)
-#   deploy.sh disagg   switch the workers to 1 prefill + 1 decode
-#   deploy.sh delete   remove the Dynamo pods and the Run:ai project
+#   deploy.sh          create or update the Run:ai project and the DynamoGraphDeployment
+#   deploy.sh delete   remove the DynamoGraphDeployment and the Run:ai project
 #
-# Steps: Run:ai project "dynamo" (1 GPU deserved) -> wait for its namespace and the BNK tenant the
-# tenancy controller creates -> etcd + NATS -> Dynamo -> HTTPRoute on the tenant Gateway -> wait.
+# Steps: Dynamo platform present -> Run:ai project "dynamo" (1 GPU deserved) -> its namespace -> mark the
+# namespace as running Dynamo (the tenancy controller then renders an F5EPP with engine dynamo) -> the
+# DynamoGraphDeployment -> wait for the workers and for BNK's picker.
 set -euo pipefail
 export KUBECONFIG="${KUBECONFIG:-/etc/kubernetes/admin.conf}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,7 +15,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # kai.resources Projects); labctl does that and waits for the project to be Ready with its namespace.
 LABCTL="${LABCTL:-$(command -v labctl || echo "$HERE/../../labctl/labctl")}"
 PROJECT="${PROJECT:-dynamo}"
-MODE="${1:-agg}"
+GRAPH=mocker
+MODE="${1:-deploy}"
 
 say() { printf '\n== %s\n' "$*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -29,13 +31,16 @@ project_ns() { kubectl get projects.kai.resources "$PROJECT" -o jsonpath='{.stat
 
 if [ "$MODE" = delete ]; then
   ns=$(project_ns || true)
-  if [ -n "$ns" ]; then
-    kubectl -n "$ns" delete -f "$HERE/route.yaml" -f "$HERE/disagg.yaml" -f "$HERE/agg.yaml" -f "$HERE/infra.yaml" --ignore-not-found
-  fi
+  [ -n "$ns" ] && kubectl -n "$ns" delete dynamographdeployment "$GRAPH" --ignore-not-found
   "$LABCTL" tenant delete "$PROJECT" --no-wait
   exit 0
 fi
-case "$MODE" in agg|disagg) ;; *) die "usage: $0 [agg|disagg|delete]";; esac
+[ "$MODE" = deploy ] || die "usage: $0 [deploy|delete]"
+
+say "Dynamo platform (NVIDIA operator)"
+kubectl get crd dynamographdeployments.nvidia.com >/dev/null 2>&1 \
+  || die "the Dynamo operator is not installed; run $HERE/install.sh"
+kubectl -n dynamo-system get pods --no-headers
 
 say "Run:ai project $PROJECT"
 if ! kubectl get projects.kai.resources "$PROJECT" >/dev/null 2>&1; then
@@ -47,37 +52,32 @@ NS=$(project_ns)
 wait_for 120 "namespace $NS" kubectl get namespace "$NS"
 echo "namespace: $NS"
 
+say "Tell the tenancy controller this project runs NVIDIA Dynamo"
+kubectl annotate namespace "$NS" --overwrite \
+  tenancy.f5.com/engine=dynamo tenancy.f5.com/dynamo-graph="$GRAPH"
+
+say "DynamoGraphDeployment $GRAPH"
+kubectl -n "$NS" create secret generic hf-token-secret --from-literal=HF_TOKEN="${HF_TOKEN:-}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n "$NS" apply -f "$HERE/dgd.yaml"
+# First pull of the Dynamo image (about 0.7 GB) and the tokenizer download take a while.
+kubectl -n "$NS" wait "dynamographdeployment/$GRAPH" --for=condition=Ready --timeout=900s
+
 say "BNK tenant (written by the tenancy controller)"
 wait_for 180 "Gateway f5-bnk/$PROJECT" kubectl get gateways.gateway.networking.k8s.io -n f5-bnk "$PROJECT"
 VIP=$(kubectl get gateways.gateway.networking.k8s.io -n f5-bnk "$PROJECT" -o jsonpath='{.spec.addresses[0].value}')
+wait_for 180 "BNK's Endpoint Picker in Dynamo mode" bash -c \
+  "[ \"\$(kubectl -n $NS get f5-epps model-pool-epp -o jsonpath='{.spec.engine}')\" = dynamo ]"
+kubectl -n "$NS" rollout status deploy/model-pool-epp --timeout=300s
 echo "VIP: $VIP:8000"
 
-say "Dynamo runtime services (etcd, NATS)"
-kubectl -n "$NS" apply -f "$HERE/infra.yaml"
-kubectl -n "$NS" rollout status deploy/dynamo-etcd --timeout=600s
-kubectl -n "$NS" rollout status deploy/dynamo-nats --timeout=600s
-
-say "Dynamo frontend + Mocker workers ($MODE)"
-kubectl -n "$NS" apply -f "$HERE/agg.yaml"
-if [ "$MODE" = disagg ]; then
-  # Same Deployment name as the aggregated decode workers: this replaces them.
-  kubectl -n "$NS" apply -f "$HERE/disagg.yaml"
-else
-  kubectl -n "$NS" delete deploy dynamo-prefill --ignore-not-found
-fi
-kubectl -n "$NS" apply -f "$HERE/route.yaml"
-
-# First pull of the Dynamo image (about 0.7 GB) and the tokenizer download take a while.
-kubectl -n "$NS" rollout status deploy/dynamo-frontend --timeout=900s
-kubectl -n "$NS" rollout status deploy/dynamo-decode --timeout=900s
-if [ "$MODE" = disagg ]; then kubectl -n "$NS" rollout status deploy/dynamo-prefill --timeout=900s; fi
-
-say "Waiting for the workers to register with the frontend"
-model_up() {
-  kubectl -n "$NS" exec deploy/dynamo-frontend -c frontend -- \
-    python3 -c "import urllib.request,sys; sys.exit(0 if b'Qwen/Qwen3-0.6B' in urllib.request.urlopen('http://127.0.0.1:8000/v1/models',timeout=3).read() else 1)"
+say "Waiting for a request through BNK to be served by a Dynamo worker"
+served() {
+  curl -s -m 10 "http://$VIP:8000/v1/chat/completions" -H 'Content-Type: application/json' \
+    -d '{"model":"Qwen/Qwen3-0.6B","max_tokens":4,"nvext":{"extra_fields":["worker_id"]},"messages":[{"role":"user","content":"ready?"}]}' \
+    | grep -q decode_worker_id
 }
-wait_for 300 "the model to appear on the Dynamo frontend" model_up
+wait_for 300 "a 200 from a Dynamo worker through $VIP" served
 
 say "Done"
 kubectl -n "$NS" get pods -o wide

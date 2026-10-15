@@ -52,6 +52,8 @@ spec:
             - --vip-range={{ .Values.vipRange }}
             - --gateway-class={{ .Values.bnk.gatewayClass }}
             - --tokenizer={{ .Values.bnk.tokenizer }}
+            - --dynamo-nats={{ .Values.dynamo.natsURL }}
+            - --dynamo-tokenizer={{ .Values.dynamo.tokenizer }}
             - --pull-secret={{ .Values.bnk.pullSecret }}
             - --base-rps={{ .Values.policy.baseRPS }}
             - --min-gpu-factor={{ .Values.policy.minGPUFactor }}

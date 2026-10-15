@@ -7,6 +7,7 @@ package tenant
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -18,6 +19,17 @@ const (
 	AnnotationRPS         = "tenancy.f5.com/rps"
 	AnnotationCriticality = "tenancy.f5.com/criticality"
 	AnnotationSkip        = "tenancy.f5.com/skip"
+
+	// On the project's namespace (Run:ai creates it; the workload owner annotates it): which inference
+	// server the project runs, so BNK's Endpoint Picker reads the right signals.
+	AnnotationEngine      = "tenancy.f5.com/engine"
+	AnnotationDynamoGraph = "tenancy.f5.com/dynamo-graph"
+)
+
+// Engines the BNK 2.4 Endpoint Picker supports (F5EPP spec.engine) that this controller renders.
+const (
+	EngineVLLM   = "vllm"
+	EngineDynamo = "dynamo"
 )
 
 // Criticality is the BNK inference objective level a tenant maps to.
@@ -41,6 +53,10 @@ type Spec struct {
 	RPSOverride         *float64
 	CriticalityOverride *Criticality
 	Skip                bool
+	// Engine is the inference server behind the tenant (EngineVLLM unless the namespace says otherwise).
+	// DynamoGraph names the DynamoGraphDeployment whose decode workers form the pool (EngineDynamo only).
+	Engine      string
+	DynamoGraph string
 }
 
 // Ready reports whether Run:ai has finished setting the project up, so BNK config can be written.
@@ -55,6 +71,7 @@ func FromProject(p *kaiv1alpha1.Project) (Spec, error) {
 		Project:    p.Name,
 		Department: p.Spec.Parent,
 		Namespace:  p.Status.Namespace,
+		Engine:     EngineVLLM,
 	}
 	for _, q := range p.Spec.Queues {
 		if q.Resources != nil {
@@ -84,5 +101,28 @@ func FromProject(p *kaiv1alpha1.Project) (Spec, error) {
 		}
 	}
 	s.Skip = strings.EqualFold(strings.TrimSpace(ann[AnnotationSkip]), "true")
+	return s, nil
+}
+
+// dnsLabel is the shape of a Kubernetes object name used as a label value.
+var dnsLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// WithNamespace reads the engine annotations from the project's namespace. A Dynamo tenant must name
+// its DynamoGraphDeployment, because the pool selects that graph's decode workers by the operator's labels.
+func WithNamespace(s Spec, ann map[string]string) (Spec, error) {
+	engine := strings.TrimSpace(ann[AnnotationEngine])
+	switch engine {
+	case "", EngineVLLM:
+		s.Engine, s.DynamoGraph = EngineVLLM, ""
+	case EngineDynamo:
+		graph := strings.TrimSpace(ann[AnnotationDynamoGraph])
+		if !dnsLabel.MatchString(graph) {
+			return s, fmt.Errorf("namespace annotation %s=%q must name the DynamoGraphDeployment (a DNS label) when %s=dynamo",
+				AnnotationDynamoGraph, graph, AnnotationEngine)
+		}
+		s.Engine, s.DynamoGraph = EngineDynamo, graph
+	default:
+		return s, fmt.Errorf("namespace annotation %s=%q must be vllm or dynamo", AnnotationEngine, engine)
+	}
 	return s, nil
 }

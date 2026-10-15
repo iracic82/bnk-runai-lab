@@ -2,9 +2,9 @@
 slug: dynamo-on-runai
 id: xwkxzgxmirw3
 type: challenge
-title: NVIDIA Dynamo on Run:ai, behind BNK
-teaser: Run the real Dynamo frontend and KV-aware router on simulated GPUs. Run:ai
-  places the workers, BNK serves the front door.
+title: NVIDIA Dynamo, with BNK picking the worker
+teaser: Dynamo runs as a Run:ai project. BNK's Endpoint Picker reads Dynamo's own KV-cache
+  events and sends each request to the Dynamo worker that already holds its prompt.
 notes:
 - type: image
   url: ../assets/notes-05-dynamo.png
@@ -43,44 +43,43 @@ difficulty: intermediate
 timelimit: 2700
 enhanced_loading: null
 ---
-# NVIDIA Dynamo on Run:ai, behind BNK
+# NVIDIA Dynamo, with BNK picking the worker
 
-NVIDIA Dynamo is a serving layer for large models. Its frontend takes OpenAI-style requests, and its
-router picks the worker to send each one to. It prefers the worker that already has the prompt's KV
-cache.
+NVIDIA Dynamo is a serving layer for large models. Its workers keep a KV cache of the prompts they have
+seen, and they announce every block they store or evict as an event. BNK 2.4 can listen to those
+events: its Endpoint Picker reads them, decides which Dynamo worker already holds a prompt, and sends
+the request straight to that worker.
 
-In this lab Dynamo is simply one more Run:ai project. Run:ai decides where its workers sit on the GPUs,
-and BNK gives the project its front door, the same way it did for `tenant-a` and `tenant-b`.
+In this challenge Dynamo runs as one more Run:ai project. Run:ai places its workers on the GPUs. BNK
+gives the project its front door, and BNK, not Dynamo's own router, picks the worker for every request.
 
 ![Dynamo on Run:ai behind BNK](../assets/05-dynamo-flow.png)
 
-Here is what's real and what's simulated:
-
 | Real | Simulated |
 |---|---|
-| Dynamo frontend, KV-aware router, etcd and NATS | **Mocker**, Dynamo's own simulated engine, instead of vLLM |
+| Dynamo operator, frontend, KV events over NATS | **Mocker**, Dynamo's own simulated engine, instead of vLLM |
 | Run:ai project, queue, scheduler and GPU fractions | The GPUs (fake-gpu-operator) |
-| BNK 2.4 Gateway, VIP, route and rate limit | The DPU (Dynamo does not use it here) |
+| BNK 2.4 Gateway, rate limit, metering, and the Endpoint Picker in Dynamo mode | The DPU |
 
-> **Mocker** is part of Dynamo. It registers like a real worker, keeps a simulated KV cache, publishes KV
-> events to the router and returns generated tokens. It loads only the tokenizer, not model weights.
-
-You'll find the manifests in the **Lab code** tab. There's no Dynamo operator in this lab, just plain
-Deployments, so every flag is there to read.
+> **Mocker** is part of Dynamo. It registers like a real worker, keeps a simulated KV cache, publishes
+> the same KV events as a real worker and returns generated tokens. It loads the tokenizer, not weights.
 
 ---
 
 ## Step 1 · Deploy Dynamo as a Run:ai project
 
-The script creates a Run:ai project called `dynamo` with 1 GPU of quota. It waits for Run:ai to give the
-project a namespace and for BNK to give it a VIP. Then it starts etcd, NATS, the Dynamo frontend and two
-Mocker workers. The first run has to pull the Dynamo image, so give it a few minutes.
+Dynamo runs the way NVIDIA documents it: a `DynamoGraphDeployment`, managed by NVIDIA's Dynamo
+operator, which setup installed. Have a look at it in the **Lab code** tab, `dgd.yaml`.
+
+The script creates the Run:ai project `dynamo` with 1 GPU of quota, marks its namespace as running
+Dynamo, and applies the graph: one Dynamo frontend and two Mocker workers. The first run pulls the
+Dynamo image, so give it a few minutes.
 
 ```bash,run
 bash /root/lab/platform/dynamo/deploy.sh
 ```
 
-Load the namespace and VIP into your shell:
+Load the namespace and the VIP into your shell:
 
 ```bash,run
 source /root/lab/platform/dynamo/env.sh
@@ -91,186 +90,125 @@ source /root/lab/platform/dynamo/env.sh
 ## Step 2 · See Run:ai place the workers
 
 Every Dynamo pod asks for the Run:ai scheduler and joins the `dynamo` queue. The two workers ask for
-half a GPU each.
+half a GPU each:
 
 ```bash,run
 kubectl -n $NS get pods -o custom-columns='POD:.metadata.name,NODE:.spec.nodeName,SCHEDULER:.spec.schedulerName,QUEUE:.metadata.labels.runai/queue,GPU:.metadata.annotations.gpu-fraction'
 ```
 
-Now the project and its queue. One GPU is deserved, and the two half-GPU workers are placed against it:
+Each worker pod has two containers: the Mocker worker, and a small Dynamo frontend in **direct
+mode**. Direct mode does no routing of its own. It serves whichever worker the request names, and
+refuses a request that names none. Someone else has to pick. That someone is BNK.
+
+---
+
+## Step 3 · How BNK learns about Dynamo
+
+The tenancy controller saw the namespace annotation and gave this project a different Endpoint Picker
+from the other tenants:
 
 ```bash,run
-kubectl get projects.kai.resources dynamo -o jsonpath='{.spec.queues[0].resources.gpu}{"\n"}'
-kubectl get queues.scheduling.run.ai -o wide | grep -E 'NAME|dynamo'
+kubectl get namespace $NS -o jsonpath='{.metadata.annotations}' | jq .
+kubectl -n $NS get f5-epps model-pool-epp -o jsonpath='{.spec}' | jq '{engine, natsURL, metricsPort: .server.modelServerMetricsPort}'
 ```
 
-Run:ai packs those fractions onto GPU devices, which are simulated here. This shows how many the `gpu`
-node offers:
+`engine: dynamo` and `natsURL` are the two fields BNK 2.4 documents for Dynamo. The picker subscribes
+to Dynamo's event bus, NATS, and reads the KV-cache events the workers publish.
+
+The pool is the two worker pods, picked out by the labels Dynamo's operator put on them. Dynamo's own
+frontend is not in it:
 
 ```bash,run
-kubectl get node gpu -o jsonpath='{.status.allocatable.nvidia\.com/gpu}{" GPUs on gpu node\n"}'
+kubectl -n $NS get inferencepools.inference.networking.k8s.io model-pool -o jsonpath='{.spec.selector}' | jq .
 ```
 
 ---
 
-## Step 3 · Send requests through BNK
-
-The tenancy controller turned the `dynamo` project into a BNK tenant, exactly as it did the others. Its
-Gateway holds the VIP, and `dynamo-route` sends the OpenAI paths on to the Dynamo frontend:
+## Step 4 · Send requests through BNK
 
 ```bash,run
-kubectl get gateways.gateway.networking.k8s.io -n f5-bnk dynamo
-kubectl -n $NS get httproutes.gateway.networking.k8s.io
+curl -s http://$VIP:8000/v1/models | jq -r '.data[].id'
 ```
 
-Ask the frontend which models its workers registered:
+A chat request through the VIP. `nvext.extra_fields` asks Dynamo to report which worker served it:
 
 ```bash,run
-curl -s http://$VIP:8000/v1/models | jq .
+curl -si http://$VIP:8000/v1/chat/completions -H 'Content-Type: application/json' -d "{
+  \"model\": \"$MODEL\", \"max_tokens\": 16, \"nvext\": {\"extra_fields\": [\"worker_id\"]},
+  \"messages\": [{\"role\": \"user\", \"content\": \"Hello from the BNK front door\"}]}" \
+  | grep -iE '^HTTP|x-bnk-tenant|decode_worker_id' | sed -E 's/.*("decode_worker_id":[0-9]+).*/\1/'
 ```
 
-A chat request through the VIP. `nvext.extra_fields` asks Dynamo to report which worker served it, and
-`-i` shows BNK's `X-BNK-Tenant` header:
+**You should see:** `HTTP/1.1 200`, `X-BNK-Tenant: dynamo`, and the ID of the worker that answered.
 
-```bash,run
-curl -si http://$VIP:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{
-  "model": "Qwen/Qwen3-0.6B",
-  "messages": [{"role": "user", "content": "Hello from the BNK front door"}],
-  "max_tokens": 16,
-  "nvext": {"extra_fields": ["worker_id"]}
-}'
-```
-
-**You should see:** `HTTP/1.1 200`, `X-BNK-Tenant: dynamo`, and `nvext.worker_id` naming the worker.
-
-The text is filler from Mocker. The path is real: BNK VIP, Dynamo frontend, router, worker, back.
-
-**In Grafana**, a **dynamo** row appears. Its **Requests/s** and **Tokens/s** panels fill as you send
-traffic, because Dynamo gets the same BNK metering as every other tenant. The vLLM panels stay empty,
-since Mocker isn't vLLM.
+That ID came from BNK. The picker chose the worker and wrote its ID into the request; the direct-mode
+frontend in that pod served exactly that worker.
 
 ---
 
-## Step 4 · Watch the KV-aware router
+## Step 5 · BNK routes by Dynamo's KV cache
 
-The frontend runs with `--router-mode kv`. It tracks which worker holds which prompt blocks and sends
-a repeated prefix back to the worker that has it cached.
-
-First, one long shared prefix, eight times. The router sends it back to the worker that already holds
-it in cache:
+Two long prompts that start differently, six requests each. Each prompt's start is written into the
+KV cache of whichever worker serves it first, and the worker announces it on NATS:
 
 ```bash,run
-DOC=$(printf 'Our refund policy says the following. %.0s' $(seq 1 60))
-for i in $(seq 1 8); do
-  curl -s http://$VIP:8000/v1/chat/completions -H 'Content-Type: application/json' -d "{
-    \"model\": \"$MODEL\", \"max_tokens\": 8, \"nvext\": {\"extra_fields\": [\"worker_id\"]},
-    \"messages\": [{\"role\": \"user\", \"content\": \"$DOC Question $i?\"}]}" \
-  | jq -r '.nvext.worker_id.decode_worker_id'
-done | sort | uniq -c
-```
-
-**You should see:** one worker ID, eight times.
-
-Now sixteen different long prompts, all at once. With no shared cache to
-follow, the router balances on load, and the work spreads over both workers:
-
-```bash,run
-for i in $(seq 1 16); do
-  T=$(printf "Topic $i: tenant $i runs model $i on rack $i. %.0s" $(seq 1 60))
-  curl -s http://$VIP:8000/v1/chat/completions -H 'Content-Type: application/json' -d "{
-    \"model\": \"$MODEL\", \"max_tokens\": 64, \"nvext\": {\"extra_fields\": [\"worker_id\"]},
-    \"messages\": [{\"role\": \"user\", \"content\": \"$T\"}]}" \
-  | jq -r '.nvext.worker_id.decode_worker_id' &
-done | sort | uniq -c; wait
-```
-
-**You should see:** two worker IDs, roughly half each.
-
-Sent one at a time to idle workers, different prompts mostly land on the same worker: with no cache
-hit and no load to weigh, the router's tie-break wins. Concurrency is what makes it spread.
-
-You can also pin a request to one worker with the `x-dynamo-worker-instance-id` header. Take an ID from
-the output above:
-
-```bash,run
-WID=$(curl -s http://$VIP:8000/v1/chat/completions -H 'Content-Type: application/json' \
-  -d "{\"model\":\"$MODEL\",\"max_tokens\":4,\"nvext\":{\"extra_fields\":[\"worker_id\"]},\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}" \
-  | jq -r '.nvext.worker_id.decode_worker_id')
-echo "pinning to worker $WID"
-for i in 1 2 3; do
-  curl -s http://$VIP:8000/v1/chat/completions -H 'Content-Type: application/json' \
-    -H "x-dynamo-worker-instance-id: $WID" \
-    -d "{\"model\":\"$MODEL\",\"max_tokens\":4,\"nvext\":{\"extra_fields\":[\"worker_id\"]},\"messages\":[{\"role\":\"user\",\"content\":\"pinned $i $RANDOM\"}]}" \
+A=$(printf 'Our refund policy says the following. %.0s' $(seq 1 60))
+B=$(printf 'The shipping terms state this clearly. %.0s' $(seq 1 60))
+for p in A B; do
+  eval T=\$$p; echo "== prompt $p"
+  for i in $(seq 1 6); do
+    curl -s http://$VIP:8000/v1/chat/completions -H 'Content-Type: application/json' -d "{
+      \"model\": \"$MODEL\", \"max_tokens\": 4, \"nvext\": {\"extra_fields\": [\"worker_id\"]},
+      \"messages\": [{\"role\": \"user\", \"content\": \"$T Question $i?\"}]}" \
     | jq -r '.nvext.worker_id.decode_worker_id'
+    sleep 0.3
+  done | sort | uniq -c
 done
 ```
 
-The router and worker logs show the same story from the inside:
+**You should see:** each prompt stays on one worker, six times out of six. Once a worker holds a
+prompt's start in its cache, BNK keeps sending that prompt there, so it is not computed twice.
+
+The picker's own log shows it receiving Dynamo's events:
 
 ```bash,run
-kubectl -n $NS logs deploy/dynamo-frontend --tail=20
-kubectl -n $NS logs -l app=dynamo-decode --prefix --tail=10
+kubectl -n $NS logs deploy/model-pool-epp | grep 'first message received' | sed 's/.*"m"="//; s/"|.*//'
+```
+
+`dynamo kv-cache` is the cache events, `dynamo active-load` the per-worker load. Both arrive over NATS
+from the Dynamo workers.
+
+**In Grafana**, the **dynamo** row shows the same traffic as every other tenant: requests per second
+from BNK and tokens counted at the edge. The vLLM panels stay empty, since Mocker isn't vLLM.
+
+---
+
+## Step 6 · Still a tenant like any other
+
+Dynamo gets nothing special from BNK except the picker. The same rate limit, derived from its Run:ai
+quota, and the same metering apply:
+
+```bash,run
+kubectl get f5-big-cne-irules -n f5-bnk dynamo-limit -o jsonpath='{.spec.iRule}' | grep -o 'rl_n > [0-9]*'
+kubectl -n bnk-runai-tenancy get cm bnk-runai-usage -o jsonpath='{.data}' | jq 'with_entries(select(.key|test("dynamo")))'
 ```
 
 ---
 
-## Two pickers, one front door
+## Two ways to pick a Dynamo worker
 
-You have now met two schedulers that choose where a request goes:
+Dynamo also ships its own router, inside its frontend. Both read the same KV-cache events:
 
-| Path | Who picks the backend | Signal |
+| Who picks | Where it runs | What else it does |
 |---|---|---|
-| `tenant-a`, `tenant-b` (vLLM servers) | BNK's **F5 Endpoint Picker** (F5EPP) | queue depth and prefix cache, per replica |
-| `dynamo` | **Dynamo's KV router**, inside the frontend | KV blocks held per worker, and load |
+| **Dynamo's router** | inside the Dynamo frontend | routing only |
+| **BNK's Endpoint Picker** | at the BNK edge, in front of the workers | routing, plus the tenant's front door, rate limit, isolation and metering, in one place |
 
-For Dynamo, BNK sends traffic to the frontend and lets Dynamo pick the worker: the Mocker workers do not
-serve HTTP themselves, so there is nothing for BNK's picker to choose between. BNK still gives the
-Dynamo project the same front door, rate limit, tenant header and token metering as every other tenant.
+Here BNK does the picking, so a request never makes an extra hop through a router pod, and every
+policy for the tenant sits in one place.
 
-```bash,run
-kubectl get f5-epps -A
-```
-
-> F5 has announced deeper BNK and Dynamo integration, with BNK using Dynamo's routing signals. BNK 2.4
-> has no documented setting for it, so this lab does not show it.
-
----
-
-## Step 5 · Optional: disaggregated serving
-
-Dynamo can split a request into a prefill stage and a decode stage on different workers. This swaps the
-two aggregated workers for one prefill and one decode worker, still half a GPU each:
-
-```bash,run
-bash /root/lab/platform/dynamo/deploy.sh disagg
-kubectl -n $NS get pods -l dynamo.role=worker -o custom-columns='POD:.metadata.name,STAGE:.metadata.labels.dynamo\.stage,SCHEDULER:.spec.schedulerName,GPU:.metadata.annotations.gpu-fraction'
-```
-
-Now the response names both workers:
-
-```bash,run
-curl -s http://$VIP:8000/v1/chat/completions -H 'Content-Type: application/json' -d "{
-  \"model\": \"$MODEL\", \"max_tokens\": 8, \"nvext\": {\"extra_fields\": [\"worker_id\"]},
-  \"messages\": [{\"role\": \"user\", \"content\": \"split me into prefill and decode\"}]}" | jq .nvext
-```
-
-Go back to the aggregated setup before you click **Check**:
-
-```bash,run
-bash /root/lab/platform/dynamo/deploy.sh agg
-```
-
----
-
-## Recap
-
-- Dynamo ran as an ordinary Run:ai project. Run:ai scheduled its workers on GPU fractions inside the
-  project's quota.
-- BNK gave the project its front door without any Dynamo-specific setup: the same Gateway, VIP and rate
-  limit every Run:ai project gets. A plain HTTPRoute hands requests to the Dynamo frontend.
-- Dynamo's router chose the worker by KV cache. BNK picks the tenant and enforces its limits, and Dynamo
-  picks the GPU worker inside it.
-- F5 has announced that BNK uses Dynamo runtime signals for inference-aware routing. This lab does not
-  show that feature: it routes to Dynamo with Gateway API kinds verified on BNK 2.4.
+> One setting worth knowing: BNK 2.4's default event subject is one level shorter than the one
+> Dynamo 1.5.1 publishes on. The controller adds the documented `eppConfig` override for the
+> `dynamo-wire` plugin so the picker hears the events. You can see it in the F5EPP spec.
 
 Click **Check** to finish.

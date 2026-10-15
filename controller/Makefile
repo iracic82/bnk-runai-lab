@@ -1,5 +1,5 @@
 ENVTEST_K8S ?= 1.30.x
-IMG ?= docker.io/iracic82/bnk-runai-tenancy:0.1.7
+IMG ?= docker.io/iracic82/bnk-runai-tenancy:0.1.8
 IMG_METER ?= docker.io/iracic82/bnk-runai-meter:0.1.2
 IMG_MCP ?= docker.io/iracic82/bnk-tenancy-mcp:0.1.0
 GOBIN := $(shell go env GOPATH)/bin

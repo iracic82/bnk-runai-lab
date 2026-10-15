@@ -51,6 +51,10 @@ Then you saw why that matters on shared GPUs. `tenant-b` was refused at the edge
 went over its share, and `tenant-a`, on the same GPU, kept its latency. Tokens were counted per
 project at the edge and written back onto the Run:ai Project and its department.
 
+Finally, NVIDIA Dynamo ran as one more Run:ai project, and BNK went a step further than a front door.
+Its Endpoint Picker listened to the KV-cache events Dynamo's workers publish and sent each request to
+the worker that already held its prompt.
+
 One last look at the whole thing, from both sides.
 
 Scroll through the **Grafana** board one more time too. Every project's GPU share, requests, 429s and
@@ -69,7 +73,7 @@ kubectl -n bnk-runai-tenancy get cm bnk-runai-usage -o jsonpath='{.data}' | jq .
 
 | | |
 |---|---|
-| **Real** | BNK 2.4 (TMM and its controllers), open-source Run:ai and its scheduler, Kubernetes, the tenancy controller and token meter, the 429s, the Endpoint Picker, the metrics path, Dynamo's frontend and KV router |
+| **Real** | BNK 2.4 (TMM and its controllers), open-source Run:ai and its scheduler, Kubernetes, the tenancy controller and token meter, the 429s, the Endpoint Picker, the metrics path, the Dynamo operator and its KV-cache events, BNK's Endpoint Picker in Dynamo mode |
 | **Simulated** | the GPUs (NVIDIA fake-gpu-operator), the model servers (vLLM simulator and Dynamo Mocker, so tokens and latencies are modelled), the BlueField DPU (a node joined to the GPU node by a tunnel) |
 | **Not shown** | GPU memory isolation, DPU offload, host-CPU savings |
 

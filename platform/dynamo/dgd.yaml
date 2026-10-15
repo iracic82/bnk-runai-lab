@@ -1,0 +1,60 @@
+# NVIDIA Dynamo as a Run:ai project, deployed the way NVIDIA documents it: a DynamoGraphDeployment run by
+# the dynamo-platform operator (installed by platform/dynamo/install.sh). Based on NVIDIA's Mocker example
+# (examples/backends/mocker/deploy/agg.yaml, Dynamo 1.5.1) and Dynamo's Gateway API guide.
+#
+# Why the operator and not plain Deployments: it runs workers with Kubernetes discovery, so each worker's ID
+# is a hash of its pod name. BNK's Endpoint Picker (F5EPP engine dynamo) computes the same hash to name the
+# worker it picked; with etcd discovery the IDs are random and Dynamo rejects every pick.
+#
+# Run:ai stays in charge of placement: every pod asks for runai-scheduler and joins the project's queue.
+apiVersion: nvidia.com/v1beta1
+kind: DynamoGraphDeployment
+metadata:
+  name: mocker
+spec:
+  components:
+  # Dynamo's own frontend and KV router. Used for direct comparison; BNK does not send traffic here.
+  - name: Frontend
+    type: frontend
+    replicas: 1
+    podTemplate:
+      metadata:
+        labels: {runai/queue: dynamo}
+      spec:
+        schedulerName: runai-scheduler
+        nodeSelector: {app: workload}
+        containers:
+        - name: main
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-planner:1.5.1
+          # BNK's picker reads KV-cache events from NATS (the operator's default event plane is ZMQ).
+          env: [{name: DYN_EVENT_PLANE, value: nats}]
+          resources: {requests: {cpu: 100m, memory: 512Mi}}
+  # Two Mocker workers on half a GPU each. Each pod carries a Dynamo frontend sidecar in direct mode on
+  # :8000: BNK picks the worker and names it in the request; the sidecar serves exactly that worker.
+  - name: decode
+    type: decode
+    replicas: 2
+    frontendSidecar: sidecar-frontend
+    podTemplate:
+      metadata:
+        labels: {runai/queue: dynamo}
+        annotations: {gpu-fraction: "0.5"}
+      spec:
+        schedulerName: runai-scheduler
+        nodeSelector: {app: workload}
+        containers:
+        - name: main
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-planner:1.5.1
+          workingDir: /workspace
+          command: [python3, -m, dynamo.mocker]
+          # Block size 16 matches the F5EPP default (spec.blockSize), so prefix matches line up.
+          args: [--model-path, Qwen/Qwen3-0.6B, --model-name, Qwen/Qwen3-0.6B, --speedup-ratio, "5.0",
+                 --block-size, "16", --num-gpu-blocks-override, "4096"]
+          envFrom: [{secretRef: {name: hf-token-secret}}]
+          env: [{name: DYN_EVENT_PLANE, value: nats}]
+          resources: {requests: {cpu: 200m, memory: 1Gi}}
+        - name: sidecar-frontend
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-planner:1.5.1
+          args: [-m, dynamo.frontend, --router-mode, direct]
+          envFrom: [{secretRef: {name: hf-token-secret}}]
+          resources: {requests: {cpu: 50m, memory: 512Mi}}

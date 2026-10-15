@@ -36,6 +36,8 @@ step() { echo "==== $(date +%H:%M:%S) $*"; }
     --namespace bnk-runai-tenancy --create-namespace --set monitoring.enabled=true --wait --timeout 5m
   kubectl -n bnk-runai-tenancy rollout status deploy/bnk-runai-tenancy --timeout=300s
   kubectl -n bnk-runai-tenancy rollout status deploy/bnk-runai-meter --timeout=300s
+  step "NVIDIA Dynamo platform (operator + NATS) for challenge 5"
+  bash "$LAB_ROOT/platform/dynamo/install.sh"
   step "Prometheus + Grafana"
   bash "$LAB_ROOT/platform/observability/install.sh"
   step "interactive lab topology"

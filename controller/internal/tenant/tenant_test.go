@@ -94,3 +94,32 @@ func TestReady(t *testing.T) {
 		t.Error("NotReady phase: not ready")
 	}
 }
+
+func TestWithNamespace(t *testing.T) {
+	base, _ := FromProject(runaiProject(nil))
+	if base.Engine != EngineVLLM {
+		t.Fatalf("default engine = %q", base.Engine)
+	}
+	cases := []struct {
+		ann         map[string]string
+		engine, dyn string
+		wantErr     bool
+	}{
+		{nil, EngineVLLM, "", false},
+		{map[string]string{AnnotationEngine: "vllm"}, EngineVLLM, "", false},
+		{map[string]string{AnnotationEngine: "dynamo", AnnotationDynamoGraph: "mocker"}, EngineDynamo, "mocker", false},
+		{map[string]string{AnnotationEngine: "dynamo"}, "", "", true},
+		{map[string]string{AnnotationEngine: "dynamo", AnnotationDynamoGraph: "Bad Name"}, "", "", true},
+		{map[string]string{AnnotationEngine: "sglang"}, "", "", true},
+	}
+	for _, c := range cases {
+		s, err := WithNamespace(base, c.ann)
+		if (err != nil) != c.wantErr {
+			t.Errorf("%v: err = %v", c.ann, err)
+			continue
+		}
+		if !c.wantErr && (s.Engine != c.engine || s.DynamoGraph != c.dyn) {
+			t.Errorf("%v: got %q/%q", c.ann, s.Engine, s.DynamoGraph)
+		}
+	}
+}

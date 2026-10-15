@@ -4,23 +4,28 @@ export KUBECONFIG=/etc/kubernetes/admin.conf
 
 NS=$(kubectl get projects.kai.resources dynamo -o jsonpath='{.status.namespace}' 2>/dev/null || true)
 if [ -z "$NS" ]; then
-  fail-message "There is no Run:ai project 'dynamo' with a namespace yet. Run platform/dynamo/deploy.sh."
+  fail-message "There is no Run:ai project 'dynamo' with a namespace yet. Run: bash /root/lab/platform/dynamo/deploy.sh"
   exit 1
 fi
 
-running=$(kubectl -n "$NS" get pods -l dynamo.role=worker --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
-if [ "$running" -lt 2 ]; then
-  fail-message "Expected at least 2 Dynamo Mocker workers Running in $NS, found $running."
-  exit 1
-fi
-if ! kubectl -n "$NS" get pods -l app=dynamo-frontend --field-selector=status.phase=Running --no-headers 2>/dev/null | grep -q .; then
-  fail-message "The Dynamo frontend is not Running in $NS."
+if [ "$(kubectl -n "$NS" get dynamographdeployment mocker -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" != True ]; then
+  fail-message "The DynamoGraphDeployment 'mocker' in $NS is not Ready yet."
   exit 1
 fi
 
-others=$(kubectl -n "$NS" get pods -l dynamo.role=worker -o jsonpath='{range .items[*]}{.spec.schedulerName}{"\n"}{end}' | grep -vc '^runai-scheduler$' || true)
-if [ "$others" -ne 0 ]; then
+workers=$(kubectl -n "$NS" get pods -l nvidia.com/dynamo-graph-deployment-name=mocker,nvidia.com/dynamo-component-type=decode \
+  -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.spec.schedulerName}{"\n"}{end}')
+if [ "$(grep -c . <<<"$workers")" -lt 2 ]; then
+  fail-message "Expected 2 Dynamo workers Running in $NS."
+  exit 1
+fi
+if grep -vq '^runai-scheduler$' <<<"$workers"; then
   fail-message "Some Dynamo workers were not scheduled by the Run:ai scheduler (runai-scheduler)."
+  exit 1
+fi
+
+if [ "$(kubectl -n "$NS" get f5-epps model-pool-epp -o jsonpath='{.spec.engine}' 2>/dev/null)" != dynamo ]; then
+  fail-message "BNK's Endpoint Picker for the dynamo project is not in Dynamo mode. Is the tenancy controller running?"
   exit 1
 fi
 
@@ -30,10 +35,10 @@ if [ -z "$VIP" ]; then
   exit 1
 fi
 
-code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "http://$VIP:8000/v1/chat/completions" \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"Qwen/Qwen3-0.6B","messages":[{"role":"user","content":"check"}],"max_tokens":8}' || true)
-if [ "$code" != "200" ]; then
-  fail-message "A request through the BNK VIP $VIP:8000 returned HTTP ${code:-none}, expected 200."
+# The picker names the worker in the request; a 200 carrying decode_worker_id means BNK picked a real worker.
+body=$(curl -s --max-time 20 "http://$VIP:8000/v1/chat/completions" -H 'Content-Type: application/json' \
+  -d '{"model":"Qwen/Qwen3-0.6B","max_tokens":4,"nvext":{"extra_fields":["worker_id"]},"messages":[{"role":"user","content":"check"}]}' || true)
+if ! grep -q decode_worker_id <<<"$body"; then
+  fail-message "A request through the BNK VIP $VIP:8000 was not served by a Dynamo worker: ${body:0:160}"
   exit 1
 fi

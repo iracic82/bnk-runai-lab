@@ -7,9 +7,9 @@
 controller:
   image:
     repository: docker.io/iracic82/bnk-runai-tenancy
-    tag: "0.1.7"
-    # Pinned build of 0.1.7; when set, the image is pulled by digest and the tag is informational.
-    digest: "sha256:ccec888eb6c590b397a395ef914af8241e41d7c56c3b98790122d56331056150"
+    tag: "0.1.8"
+    # Pinned build of 0.1.8; when set, the image is pulled by digest and the tag is informational.
+    digest: "sha256:c6137432ba14355dec97ea70cedd1f639e131c1823457d8d53ddbcdddaf31652"
     pullPolicy: IfNotPresent
   # One active controller; extra replicas wait on the leader-election Lease.
   replicaCount: 1
@@ -56,6 +56,15 @@ policy:
   minGPUFactor: 0.25
   # --critical-priority-threshold: Run:ai queue priority that maps to Critical
   criticalPriorityThreshold: 100
+
+# NVIDIA Dynamo tenants: a project whose namespace carries tenancy.f5.com/engine=dynamo and
+# tenancy.f5.com/dynamo-graph=<DynamoGraphDeployment> gets BNK's Endpoint Picker in Dynamo mode
+# (F5EPP engine dynamo). Dynamo itself runs under NVIDIA's dynamo-platform operator.
+dynamo:
+  # NATS the Dynamo workers publish KV-cache events on (dynamo-platform chart, global.nats.install=true).
+  natsURL: "nats://dynamo-platform-nats.dynamo-system.svc.cluster.local:4222"
+  # Model the Dynamo workers serve; the picker tokenizes prompts with it.
+  tokenizer: "Qwen/Qwen3-0.6B"
 
 metering:
   # Token metering: the tenant iRules send usage from TMM to the meter on the control node.

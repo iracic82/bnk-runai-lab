@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/f5devcentral/bnk-runai-tenancy/internal/reconcile"
+	"github.com/f5devcentral/bnk-runai-tenancy/internal/tenant"
 )
 
 // Labels and annotations every BNK object of a tenant carries.
@@ -65,13 +66,20 @@ type Config struct {
 	MeteringSink string
 	// MeteringToken guards the iRule's /bnk/flush path, which the meter polls to collect usage lines.
 	MeteringToken string
+	// DynamoNATS is the NATS URL Dynamo workers publish KV-cache events on (the dynamo-platform chart's
+	// NATS). A Dynamo tenant's Endpoint Picker subscribes there (F5EPP spec.natsURL, required).
+	DynamoNATS string
+	// DynamoTokenizer is the model the Dynamo workers serve; the picker tokenizes prompts with it.
+	DynamoTokenizer string
 }
 
 // DefaultConfig matches the lab cluster.
 func DefaultConfig() Config {
 	return Config{Namespace: "f5-bnk", GatewayClass: "f5-gateway-class",
 		Tokenizer: "NousResearch/Meta-Llama-3.1-8B-Instruct", ListenPort: 8000,
-		PullSecret: "far-pull-secret"}
+		PullSecret:      "far-pull-secret",
+		DynamoNATS:      "nats://dynamo-platform-nats.dynamo-system.svc.cluster.local:4222",
+		DynamoTokenizer: "Qwen/Qwen3-0.6B"}
 }
 
 // Names of a tenant's objects. The Gateway, iRule and NetPolicy live in the BNK namespace, so they
@@ -109,7 +117,7 @@ func Render(cfg Config, d reconcile.Desired, vip string) ([]*unstructured.Unstru
 
 	pool := obj(PoolGVK, t.Namespace, PoolName(), d)
 	pool.Object["spec"] = map[string]any{
-		"selector":    map[string]any{"matchLabels": map[string]any{ModelServerLabel: ModelServerValue}},
+		"selector":    map[string]any{"matchLabels": poolSelector(t)},
 		"targetPorts": []any{map[string]any{"number": int64(modelPort)}},
 		"endpointPickerRef": map[string]any{
 			"name": EPPName(), "port": map[string]any{"number": int64(eppPort)},
@@ -119,20 +127,27 @@ func Render(cfg Config, d reconcile.Desired, vip string) ([]*unstructured.Unstru
 	}
 
 	epp := obj(EPPGVK, t.Namespace, EPPName(), d)
-	epp.Object["spec"] = map[string]any{
-		"poolRef": map[string]any{"name": PoolName()},
-		"engine":  "vllm",
-		"server": map[string]any{
-			"modelServerMetricsPort": int64(modelPort), "secureServing": false, "metricsEndpointAuth": false,
-		},
-		"tokenizer": map[string]any{"name": cfg.Tokenizer},
-		"eppConfig": map[string]any{"config": map[string]any{"schedulingProfiles": []any{map[string]any{
-			"name": "default",
-			"plugins": []any{
-				map[string]any{"pluginRef": "prefix-cache", "weight": 0.20},
-				map[string]any{"pluginRef": "queue-scorer", "weight": 0.45},
+	if t.Engine == tenant.EngineDynamo {
+		if cfg.DynamoNATS == "" {
+			return nil, fmt.Errorf("project %s runs NVIDIA Dynamo but no Dynamo NATS URL is configured (--dynamo-nats)", t.Project)
+		}
+		epp.Object["spec"] = dynamoEPPSpec(cfg)
+	} else {
+		epp.Object["spec"] = map[string]any{
+			"poolRef": map[string]any{"name": PoolName()},
+			"engine":  tenant.EngineVLLM,
+			"server": map[string]any{
+				"modelServerMetricsPort": int64(modelPort), "secureServing": false, "metricsEndpointAuth": false,
 			},
-		}}}},
+			"tokenizer": map[string]any{"name": cfg.Tokenizer},
+			"eppConfig": map[string]any{"config": map[string]any{"schedulingProfiles": []any{map[string]any{
+				"name": "default",
+				"plugins": []any{
+					map[string]any{"pluginRef": "prefix-cache", "weight": 0.20},
+					map[string]any{"pluginRef": "queue-scorer", "weight": 0.45},
+				},
+			}}}},
+		}
 	}
 
 	route := obj(RouteGVK, t.Namespace, RouteName(), d)
@@ -434,6 +449,49 @@ when CLIENT_CLOSED {
 
 // routeMatches is /v1, plus /bnk when metering is on: /bnk is the iRule's own flush path and never
 // reaches the backend, but it needs a route match or BNK answers 404 before the iRule runs (Lambda lab).
+// Dynamo labels the operator (dynamo-platform) puts on every pod of a DynamoGraphDeployment.
+const (
+	DynamoGraphLabel     = "nvidia.com/dynamo-graph-deployment-name"
+	DynamoComponentLabel = "nvidia.com/dynamo-component-type"
+	// dynamoMetricsPort is DYN_SYSTEM_PORT, which the operator sets on every worker.
+	dynamoMetricsPort = 9090
+)
+
+// poolSelector picks the pods BNK sends a tenant's requests to. For Dynamo that is the graph's decode
+// workers; each carries a Dynamo frontend sidecar in direct mode on port 8000, which serves the worker the
+// picker named. The Dynamo frontend itself is never in the pool: BNK, not Dynamo's router, picks the worker.
+func poolSelector(t tenant.Spec) map[string]any {
+	if t.Engine == tenant.EngineDynamo {
+		return map[string]any{DynamoGraphLabel: t.DynamoGraph, DynamoComponentLabel: "decode"}
+	}
+	return map[string]any{ModelServerLabel: ModelServerValue}
+}
+
+// dynamoEPPSpec is the F5EPP for a Dynamo pool, as documented for BNK 2.4 (engine dynamo, natsURL).
+//
+// The dynamo-wire topics are overridden through the documented eppConfig plugin merge: BNK 2.4 subscribes
+// to namespace.*.component.backend.kv-events by default, while Dynamo 1.5.1 publishes per endpoint,
+// namespace.<ns>.component.backend.endpoint.generate.kv-events (seen live with nats sub ">"). Without the
+// override routing still works, but the picker never receives Dynamo's KV-cache events.
+func dynamoEPPSpec(cfg Config) map[string]any {
+	return map[string]any{
+		"poolRef": map[string]any{"name": PoolName()},
+		"engine":  tenant.EngineDynamo,
+		"natsURL": cfg.DynamoNATS,
+		"server": map[string]any{
+			"modelServerMetricsPort": int64(dynamoMetricsPort), "secureServing": false, "metricsEndpointAuth": false,
+		},
+		"tokenizer": map[string]any{"name": cfg.DynamoTokenizer},
+		"eppConfig": map[string]any{"config": map[string]any{"plugins": []any{map[string]any{
+			"name": "dynamo-wire", "type": "dynamo-wire",
+			"parameters": map[string]any{
+				"kv_events_topic":  "component.backend.endpoint.generate.kv-events",
+				"kv_metrics_topic": "component.backend.endpoint.generate.kv_metrics",
+			},
+		}}}},
+	}
+}
+
 func routeMatches(cfg Config) []any {
 	m := []any{map[string]any{"path": map[string]any{"type": "PathPrefix", "value": "/v1"}}}
 	if cfg.MeteringSink != "" {

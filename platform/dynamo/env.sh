@@ -1,4 +1,4 @@
-# Source me: sets NS (the Run:ai project's namespace) and VIP (its BNK front door) for project dynamo.
+# Source me: sets NS (the Run:ai project's namespace), VIP (its BNK front door) and MODEL for project dynamo.
 export KUBECONFIG="${KUBECONFIG:-/etc/kubernetes/admin.conf}"
 PROJECT="${PROJECT:-dynamo}"
 NS=$(kubectl get projects.kai.resources "$PROJECT" -o jsonpath='{.status.namespace}' 2>/dev/null)

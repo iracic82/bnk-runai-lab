@@ -1,4 +1,4 @@
-"""Challenge 05: NVIDIA Dynamo on Run:ai, behind BNK. Loaded by build.py (build(h) -> jobs)."""
+"""Challenge 05: NVIDIA Dynamo, with BNK picking the worker. Loaded by build.py (build(h) -> jobs)."""
 
 FLOW_H = 440
 
@@ -33,12 +33,12 @@ body{width:1400px;height:%(h)dpx;background:#fff;font-family:Inter,Helvetica,Ari
  <div class="box f5"><div class="head"><b>F5 BNK 2.4 &middot; dynamo</b><span class="vm" style="color:#fff">node: dpu</span></div><div class="cells">
   <div class="cell"><b>Gateway + VIP</b><span>from the Run:ai project</span></div>
   <div class="cell"><b>Rate limit</b><span>iRule, from the GPU quota</span></div>
-  <div class="cell"><b>HTTPRoute</b><span>/v1/chat &rarr; Dynamo frontend</span></div></div></div>
+  <div class="cell"><b>Endpoint Picker</b><span>engine: dynamo &middot; picks the worker</span></div></div></div>
  <div class="arrow">&rarr;</div>
  <div class="box dyn"><div class="head"><b>NVIDIA Dynamo</b><span class="vm" style="color:#fff">real</span></div><div class="cells">
-  <div class="cell"><b>Frontend</b><span>OpenAI API, tokenizer</span></div>
-  <div class="cell"><b>KV-aware router</b><span>picks the worker with the cache</span></div>
-  <div class="cell"><b>etcd &middot; NATS</b><span>discovery, KV events</span></div></div></div>
+  <div class="cell"><b>Operator</b><span>DynamoGraphDeployment</span></div>
+  <div class="cell"><b>NATS</b><span>KV-cache events &rarr; BNK's picker</span></div>
+  <div class="cell"><b>Direct-mode frontend</b><span>serves the worker BNK named</span></div></div></div>
 </div>
 <div class="bridge"><div><b>BNK &harr; Run:ai tenancy controller</b>&nbsp; project <b>dynamo</b> &rarr; namespace, Gateway, VIP, rate limit</div><span class="vm">node: control</span></div>
 <div class="row">
@@ -52,7 +52,7 @@ body{width:1400px;height:%(h)dpx;background:#fff;font-family:Inter,Helvetica,Ari
   <div class="cell"><b>Mocker worker A <span class="sim">simulated engine</span></b><span>0.5 &times; A10, KV cache, KV events</span></div>
   <div class="cell"><b>Mocker worker B <span class="sim">simulated engine</span></b><span>0.5 &times; A10, KV cache, KV events</span></div>
   <div class="cell"><b>4 &times; A10 <span class="sim">simulated</span></b><span>NVIDIA fake-gpu-operator</span></div>
-  <div class="cell"><b>Optional: disagg</b><span>prefill worker + decode worker</span></div></div></div>
+  <div class="cell"><b>Pod-name worker IDs</b><span>the ID BNK's picker computes</span></div></div></div>
 </div>
 </body></html>""" % {"h": FLOW_H}
 
@@ -60,14 +60,14 @@ body{width:1400px;height:%(h)dpx;background:#fff;font-family:Inter,Helvetica,Ari
 def build(h):
     notes = h.slide(
         "Challenge 5 &middot; NVIDIA Dynamo",
-        "Dynamo picks the <em>worker</em>.<br>BNK owns the <b>front door</b>.",
-        "NVIDIA Dynamo runs here as one more Run:ai project. Run:ai places its workers on GPU fractions, "
-        "BNK gives the project a VIP and a rate limit, and Dynamo's router sends each request to the "
-        "worker that already holds its KV cache.",
-        [h.card(h.NV, "Dynamo", "Real frontend and router",
-                "OpenAI API and KV-aware routing. Workers are Mocker, Dynamo's own simulated engine."),
-         h.card(h.BL, "Run:ai", "Schedules every pod",
+        "BNK picks the <em>Dynamo worker</em>,<br>from Dynamo's own <b>KV cache</b>.",
+        "NVIDIA Dynamo runs here as one more Run:ai project. Run:ai places its workers on GPU fractions. "
+        "BNK's Endpoint Picker listens to the KV-cache events the workers publish and sends each request "
+        "to the worker that already holds its prompt.",
+        [h.card(h.NV, "Dynamo", "Operator, KV events, Mocker",
+                "Deployed by NVIDIA's operator. Workers are Mocker, Dynamo's own simulated engine."),
+         h.card(h.NV, "Run:ai", "Places the workers",
                 "Project dynamo, 1 GPU of quota, two workers on half an A10 each."),
-         h.card(h.F5, "BNK 2.4", "Serves the tenant",
-                "Same Gateway, VIP and rate limit as any Run:ai project, plus a route to Dynamo.")])
+         h.card(h.F5, "BNK 2.4", "Picks the worker",
+                "F5EPP engine dynamo, plus the same Gateway, rate limit and metering as any tenant.")])
     return {"notes-05-dynamo": (notes, 1600, 900), "05-dynamo-flow": (FLOW, 1400, FLOW_H)}

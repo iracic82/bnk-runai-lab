@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	kaiv1alpha1 "github.com/kai-scheduler/kai-resource-management-api/kai/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -70,6 +71,22 @@ func setup(t *testing.T, objs ...client.Object) (*ProjectReconciler, *recordingA
 	s := runtime.NewScheme()
 	if err := kaiv1alpha1.AddToScheme(s); err != nil {
 		t.Fatal(err)
+	}
+	if err := corev1.AddToScheme(s); err != nil {
+		t.Fatal(err)
+	}
+	// Run:ai creates every ready project's namespace; add the ones a test did not provide itself.
+	have := map[string]bool{}
+	for _, o := range objs {
+		if ns, ok := o.(*corev1.Namespace); ok {
+			have[ns.Name] = true
+		}
+	}
+	for _, o := range objs {
+		if p, ok := o.(*kaiv1alpha1.Project); ok && p.Status.Namespace != "" && !have[p.Status.Namespace] {
+			have[p.Status.Namespace] = true
+			objs = append(objs, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: p.Status.Namespace}})
+		}
 	}
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(objs...).
 		WithStatusSubresource(&kaiv1alpha1.Project{}).Build()
@@ -267,5 +284,48 @@ func TestReadyEventOnlyOnChange(t *testing.T) {
 	reconcileOnce(t, r, "tenant-a")
 	if n := len(rec.Events); n != 2 {
 		t.Errorf("a quota change should post one more event, got %d total", n)
+	}
+}
+
+func TestDynamoNamespaceSelectsDynamoEngine(t *testing.T) {
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "runai-dynamo", Annotations: map[string]string{
+		"tenancy.f5.com/engine": "dynamo", "tenancy.f5.com/dynamo-graph": "mocker"}}}
+	r, a, _ := setup(t, readyProject("dynamo", "runai-dynamo", 1, 50), ns)
+	reconcileOnce(t, r, "dynamo")
+	d := a.applied["dynamo"]
+	if d.Tenant.Engine != "dynamo" || d.Tenant.DynamoGraph != "mocker" {
+		t.Errorf("engine/graph = %q/%q, want dynamo/mocker", d.Tenant.Engine, d.Tenant.DynamoGraph)
+	}
+}
+
+func TestPlainNamespaceIsVLLM(t *testing.T) {
+	r, a, _ := setup(t, readyProject("tenant-a", "runai-tenant-a", 2, 150))
+	reconcileOnce(t, r, "tenant-a")
+	if e := a.applied["tenant-a"].Tenant.Engine; e != "vllm" {
+		t.Errorf("engine = %q, want vllm", e)
+	}
+}
+
+func TestDynamoWithoutGraphIsAnError(t *testing.T) {
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "runai-dynamo", Annotations: map[string]string{
+		"tenancy.f5.com/engine": "dynamo"}}}
+	r, a, g := setup(t, readyProject("dynamo", "runai-dynamo", 1, 50), ns)
+	reconcileOnce(t, r, "dynamo")
+	if _, ok := a.applied["dynamo"]; ok || g["dynamo"] != StateError {
+		t.Errorf("applied=%v state=%q, want nothing applied and Error", a.applied, g["dynamo"])
+	}
+}
+
+func TestMissingNamespaceWaits(t *testing.T) {
+	s := runtime.NewScheme()
+	_ = kaiv1alpha1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(readyProject("tenant-a", "runai-tenant-a", 2, 150)).
+		WithStatusSubresource(&kaiv1alpha1.Project{}).Build()
+	a, g := newRecorder(), memGauge{}
+	r := &ProjectReconciler{Client: c, Applier: a, Policy: DefaultPolicy(), State: g}
+	res := reconcileOnce(t, r, "tenant-a")
+	if res.RequeueAfter == 0 || len(a.applied) != 0 || g["tenant-a"] != StatePending {
+		t.Errorf("res=%+v applied=%v state=%q", res, a.applied, g["tenant-a"])
 	}
 }

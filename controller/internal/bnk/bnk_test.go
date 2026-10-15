@@ -349,3 +349,68 @@ func TestApplyCopiesPullSecretIntoTenantNamespace(t *testing.T) {
 		t.Errorf("empty PullSecret must be a no-op, got %v", err)
 	}
 }
+
+func TestDynamoTenantUsesDynamoPicker(t *testing.T) {
+	d := desired("dynamo", "runai-dynamo", 20)
+	d.Tenant.Engine, d.Tenant.DynamoGraph = tenant.EngineDynamo, "mocker"
+	objs, err := Render(DefaultConfig(), d, "172.16.201.112")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byKind := map[string]*unstructured.Unstructured{}
+	for _, o := range objs {
+		byKind[o.GetKind()] = o
+	}
+	epp := byKind["F5EPP"]
+	engine, _, _ := unstructured.NestedString(epp.Object, "spec", "engine")
+	nats, _, _ := unstructured.NestedString(epp.Object, "spec", "natsURL")
+	port, _, _ := unstructured.NestedInt64(epp.Object, "spec", "server", "modelServerMetricsPort")
+	tok, _, _ := unstructured.NestedString(epp.Object, "spec", "tokenizer", "name")
+	if engine != "dynamo" || nats == "" || port != 9090 || tok != "Qwen/Qwen3-0.6B" {
+		t.Errorf("F5EPP engine=%q natsURL=%q metricsPort=%d tokenizer=%q", engine, nats, port, tok)
+	}
+	plugins, _, _ := unstructured.NestedSlice(epp.Object, "spec", "eppConfig", "config", "plugins")
+	topic, _, _ := unstructured.NestedString(plugins[0].(map[string]any), "parameters", "kv_events_topic")
+	if topic != "component.backend.endpoint.generate.kv-events" {
+		t.Errorf("kv_events_topic = %q", topic)
+	}
+	sel, _, _ := unstructured.NestedStringMap(byKind["InferencePool"].Object, "spec", "selector", "matchLabels")
+	if len(sel) != 2 || sel["nvidia.com/dynamo-graph-deployment-name"] != "mocker" || sel["nvidia.com/dynamo-component-type"] != "decode" {
+		t.Errorf("pool selector = %v, want the mocker graph's decode workers only", sel)
+	}
+}
+
+func TestVLLMTenantKeepsVLLMPicker(t *testing.T) {
+	d := desired("tenant-a", "runai-tenant-a", 40)
+	d.Tenant.Engine = tenant.EngineVLLM
+	objs, err := Render(DefaultConfig(), d, "172.16.201.110")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range objs {
+		switch o.GetKind() {
+		case "F5EPP":
+			if e, _, _ := unstructured.NestedString(o.Object, "spec", "engine"); e != "vllm" {
+				t.Errorf("engine = %q", e)
+			}
+			if _, found, _ := unstructured.NestedString(o.Object, "spec", "natsURL"); found {
+				t.Error("a vLLM picker must not get a natsURL")
+			}
+		case "InferencePool":
+			sel, _, _ := unstructured.NestedStringMap(o.Object, "spec", "selector", "matchLabels")
+			if sel["app.kubernetes.io/part-of"] != "model-server" || len(sel) != 1 {
+				t.Errorf("pool selector = %v", sel)
+			}
+		}
+	}
+}
+
+func TestDynamoWithoutNATSFails(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DynamoNATS = ""
+	d := desired("dynamo", "runai-dynamo", 20)
+	d.Tenant.Engine, d.Tenant.DynamoGraph = tenant.EngineDynamo, "mocker"
+	if _, err := Render(cfg, d, "172.16.201.112"); err == nil {
+		t.Error("rendering a Dynamo tenant without a NATS URL must fail")
+	}
+}

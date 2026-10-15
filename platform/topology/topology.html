@@ -127,9 +127,9 @@
       <span class="p">Run:ai places each model on a GPU fraction; BNK's Endpoint Picker chooses the replica. Grafana shows both side by side.</span>
       <span class="proof">runai-scheduler · gpu-fraction 0.5 · F5EPP</span></button>
     <button class="vcard" data-go="dynamo" style="--vc:var(--dyn)"><span class="k">NVIDIA Dynamo <b>shown</b></span>
-      <span class="h">Dynamo on Run:ai, behind BNK</span>
-      <span class="p">Dynamo's frontend and KV router with Mocker workers on Run:ai GPU fractions, fronted like any tenant.</span>
-      <span class="proof">shared prefix 8/8 one worker · spread 8/8</span></button>
+      <span class="h">BNK picks the Dynamo worker</span>
+      <span class="p">Dynamo runs on Run:ai GPU fractions. BNK's Endpoint Picker reads Dynamo's KV-cache events and sends each prompt to the worker that holds it.</span>
+      <span class="proof">F5EPP engine dynamo · prefix A 6/6 one worker, prefix B 6/6 the other</span></button>
     <button class="vcard" data-go="hijack" style="--vc:var(--bnk)"><span class="k">Tenant boundary <b>shown</b></span>
       <span class="h">No tenant can publish behind another's door</span>
       <span class="p">Each Gateway admits routes only from its own Run:ai project namespace.</span>
@@ -251,14 +251,14 @@
   <text class="t" x="934" y="242">tenant-b model</text>
   <text class="s" x="934" y="259">vLLM sim · 0.5 GPU</text>
   <rect class="card" id="n-dfront" x="920" y="284" width="258" height="52" rx="6" style="stroke:var(--dyn)"/>
-  <text class="t" x="934" y="306">Dynamo frontend</text>
-  <text class="s" x="934" y="323">OpenAI API · KV-aware router</text>
+  <text class="t" x="934" y="306">BNK picker, Dynamo mode</text>
+  <text class="s" x="934" y="323">F5EPP engine dynamo · natsURL</text>
   <rect class="card" id="n-dwork" x="920" y="348" width="258" height="52" rx="6" style="stroke:var(--dyn)"/>
   <text class="t" x="934" y="370">Dynamo Mocker workers</text>
-  <text class="s" x="934" y="387">2 × decode · 0.5 GPU each</text>
+  <text class="s" x="934" y="387">2 × decode · direct-mode frontend</text>
   <rect class="card" id="n-dinfra" x="920" y="412" width="258" height="44" rx="6"/>
-  <text class="t" x="934" y="432">etcd + NATS</text>
-  <text class="s" x="934" y="447">discovery · KV events</text>
+  <text class="t" x="934" y="432">Dynamo operator + NATS</text>
+  <text class="s" x="934" y="447">pod-name worker IDs · KV events</text>
 
   <!-- data path networks -->
   <rect class="node" x="560" y="504" width="634" height="112" rx="10"/>
@@ -325,7 +325,7 @@
     <tbody>
       <tr><td>BNK 2.4: TMM, Gateway API, InferencePool, F5 Endpoint Picker, iRules, NetPolicy</td><td>The DPU is a VM with GRE tunnels to the GPU node. In production TMM runs on BlueField-3.</td></tr>
       <tr><td>Open-source NVIDIA Run:ai: control plane, UI, API, scheduler, projects and quotas</td><td>The GPUs come from NVIDIA's fake-gpu-operator: real to the scheduler, no silicon.</td></tr>
-      <tr><td>NVIDIA Dynamo frontend and KV-aware router</td><td>Dynamo's Mocker engine replaces real inference; vLLM simulators stand in for vLLM.</td></tr>
+      <tr><td>NVIDIA Dynamo operator, KV-cache events over NATS, BNK's Endpoint Picker in Dynamo mode</td><td>Dynamo's Mocker engine replaces real inference; vLLM simulators stand in for vLLM.</td></tr>
       <tr><td>Every rate limit, 429, route decision and token count</td><td>Model answers are filler text from the simulators.</td></tr>
     </tbody>
   </table>
@@ -364,12 +364,12 @@ const FLOWS = {
     { d: "M500,334 H540 V118 H576", dash: true, lit: ["n-cne"], s: "BNK checks the Gateway's listener: it admits routes only from namespace <code>runai-tenant-a</code>." },
     { d: "M710,144 V156", dash: true, lit: ["n-tmm"], chips: ["c-route"], s: "The route is <b>Accepted=False, NotAllowedByListeners</b>. TMM never serves it." },
   ]},
-  dynamo: { label: "Data plane", color: "--dyn", t: "Dynamo", w: "A Run:ai project running NVIDIA Dynamo. BNK fronts it; Dynamo's own router picks the worker.", hops: [
+  dynamo: { label: "Data plane", color: "--dyn", t: "Dynamo", w: "A Run:ai project running NVIDIA Dynamo. BNK fronts it and BNK's Endpoint Picker picks the Dynamo worker from Dynamo's own KV-cache events.", hops: [
     { d: "M180,346 H200 V230 H576", lit: ["n-client", "n-tmm"], s: "The app calls the <code>dynamo</code> project's VIP, 172.16.201.112." },
     { d: "M710,250 V250", lit: ["n-tmm"], chips: ["c-route", "c-limit", "c-tag"], s: "Same front door as any tenant: own route, rate limit, tenant tag, metering." },
-    { d: "M844,250 H900 V310 H920", lit: ["n-dfront"], s: "TMM sends the request to the Dynamo frontend." },
-    { d: "M1049,336 V348", lit: ["n-dwork"], s: "Dynamo's KV router picks the worker. Live: one shared prompt went to the same worker 8 of 8 times; 16 different prompts at once split 8 and 8." },
-    { d: "M1049,400 V412", lit: ["n-dinfra"], s: "Workers announce themselves through etcd and publish KV-cache events over NATS, which the router reads." },
+    { d: "M1049,412 V400", lit: ["n-dinfra", "n-dwork"], s: "Each Dynamo worker publishes KV-cache events over NATS. BNK's picker subscribes (F5EPP <code>natsURL</code>) and learns which worker holds which prompt." },
+    { d: "M844,250 H900 V310 H920", lit: ["n-dfront"], s: "TMM asks BNK's Endpoint Picker, in Dynamo mode, which worker should serve the request." },
+    { d: "M1049,336 V348", lit: ["n-dwork"], s: "BNK sends the request to that worker. Its direct-mode frontend serves exactly the worker BNK named. Live: prompt A 6 of 6 to one worker, prompt B 6 of 6 to the other." },
     { d: "M920,310 H880 V290 H844", lit: ["n-tmm"], back: true, chips: ["c-tag", "c-meter"], s: "The answer returns through TMM with <code>X-BNK-Tenant: dynamo</code>." },
   ]},
   meter: { label: "Data path", color: "--meter", t: "Token metering", w: "How each project's token count leaves TMM and reaches Grafana and Run:ai.", hops: [
@@ -402,9 +402,9 @@ const INFO = {
   "n-sched": "<b>Run:ai scheduler.</b> Places every workload by project quota, priority and GPU fractions. Two tenants can share one GPU at 0.5 each.",
   "n-a": "<b>tenant-a models.</b> vLLM simulators with real vLLM metrics, two replicas at half a GPU each, so the Endpoint Picker has a choice.",
   "n-b": "<b>tenant-b model.</b> One vLLM simulator at half a GPU, the same GPU as one of tenant-a's.",
-  "n-dfront": "<b>Dynamo frontend.</b> NVIDIA Dynamo's real OpenAI-compatible frontend with its KV-aware router, no GPU.",
-  "n-dwork": "<b>Dynamo Mocker workers.</b> Dynamo's own GPU-free engine. Behaves like a real worker toward the router, including KV-cache events. Half a GPU each from Run:ai.",
-  "n-dinfra": "<b>etcd + NATS.</b> Dynamo's discovery (etcd) and event bus (NATS), one small pod each.",
+  "n-dfront": "<b>BNK Endpoint Picker, Dynamo mode.</b> F5EPP with <code>engine: dynamo</code> and <code>natsURL</code>, as documented for BNK 2.4. It names the chosen Dynamo worker in the request.",
+  "n-dwork": "<b>Dynamo Mocker workers.</b> Dynamo's own GPU-free engine, publishing real KV-cache events. Each pod has a Dynamo frontend in direct mode that serves the worker BNK picked. Half a GPU each from Run:ai.",
+  "n-dinfra": "<b>Dynamo operator + NATS.</b> NVIDIA's dynamo-platform chart. The operator gives each worker an ID derived from its pod name, which is the ID BNK's picker computes; NATS carries the KV-cache events.",
 };
 const NS = "http://www.w3.org/2000/svg";
 const hopsG = document.getElementById("hops"), packetsG = document.getElementById("packets");

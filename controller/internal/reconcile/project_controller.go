@@ -107,6 +107,22 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil // the user fixes the annotation; that update re-triggers us
 	}
 
+	// The engine (vLLM or NVIDIA Dynamo) is declared on the namespace Run:ai created for the project,
+	// by whoever deploys the workload there; the controller never guesses it from pods.
+	var ns corev1.Namespace
+	if err := r.Get(ctx, client.ObjectKey{Name: spec.Namespace}, &ns); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+		r.setState(p.Name, StatePending)
+		return ctrl.Result{RequeueAfter: r.requeue()}, nil
+	}
+	if spec, err = tenant.WithNamespace(spec, ns.Annotations); err != nil {
+		r.setState(p.Name, StateError)
+		r.event(&p, corev1.EventTypeWarning, "InvalidAnnotation", err.Error())
+		return ctrl.Result{}, nil
+	}
+
 	if spec.Skip {
 		if err := r.release(ctx, &p); err != nil {
 			return ctrl.Result{}, err
@@ -143,7 +159,8 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	r.setState(p.Name, StateServing)
 	if r.changed(p.Name, d) {
 		r.event(&p, corev1.EventTypeNormal, "BNKTenantReady",
-			fmt.Sprintf("BNK tenant serving namespace %s at %.1f req/s (%s)", spec.Namespace, d.RateLimit, d.Criticality))
+			fmt.Sprintf("BNK tenant serving namespace %s at %.1f req/s (%s), endpoint picker engine %s",
+				spec.Namespace, d.RateLimit, d.Criticality, spec.Engine))
 	}
 	return ctrl.Result{}, nil
 }
@@ -234,6 +251,8 @@ func (r *ProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kaiv1alpha1.Project{}).
 		Watches(&kaiv1alpha1.Project{}, handler.EnqueueRequestsFromMapFunc(r.sameNamespace)).
+		// Annotating a project's namespace (the engine) re-renders that project's tenant.
+		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.projectsInNamespace)).
 		Named("runai-project-tenancy").
 		// Failures retry quickly and never wait more than 30s, so a fixed cause (a missing CRD, a
 		// secret, BNK still starting) is picked up without restarting the controller.
@@ -253,6 +272,20 @@ func (r *ProjectReconciler) sameNamespace(ctx context.Context, obj client.Object
 	var out []ctrl.Request
 	for _, o := range all.Items {
 		if o.Name != p.Name && o.Status.Namespace == p.Status.Namespace {
+			out = append(out, ctrl.Request{NamespacedName: client.ObjectKey{Name: o.Name}})
+		}
+	}
+	return out
+}
+
+func (r *ProjectReconciler) projectsInNamespace(ctx context.Context, obj client.Object) []ctrl.Request {
+	var all kaiv1alpha1.ProjectList
+	if err := r.List(ctx, &all); err != nil {
+		return nil
+	}
+	var out []ctrl.Request
+	for _, o := range all.Items {
+		if o.Status.Namespace == obj.GetName() {
 			out = append(out, ctrl.Request{NamespacedName: client.ObjectKey{Name: o.Name}})
 		}
 	}

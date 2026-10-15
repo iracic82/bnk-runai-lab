@@ -69,6 +69,8 @@ func main() {
 	flag.StringVar(&bnkCfg.GatewayClass, "gateway-class", bnkCfg.GatewayClass, "GatewayClass served by BNK")
 	flag.StringVar(&bnkCfg.PullSecret, "pull-secret", bnkCfg.PullSecret, "BNK registry secret copied into tenant namespaces (empty: don't copy)")
 	flag.StringVar(&bnkCfg.Tokenizer, "tokenizer", bnkCfg.Tokenizer, "tokenizer for the Endpoint Picker's prefix-cache scorer")
+	flag.StringVar(&bnkCfg.DynamoNATS, "dynamo-nats", bnkCfg.DynamoNATS, "NATS URL Dynamo workers publish KV events on (dynamo-platform chart)")
+	flag.StringVar(&bnkCfg.DynamoTokenizer, "dynamo-tokenizer", bnkCfg.DynamoTokenizer, "tokenizer for Dynamo tenants' Endpoint Picker")
 	flag.StringVar(&bnkCfg.MeteringSink, "metering-sink", "", "IP:port TMM sends usage lines to (the meter on the control node); empty = metering off")
 	flag.StringVar(&meteringTokenFile, "metering-token-file", "", "file holding the shared metering token (required with --metering-sink)")
 	flag.StringVar(&vipRange, "vip-range", "172.16.201.110-172.16.201.149", "addresses tenant gateways are served from")
