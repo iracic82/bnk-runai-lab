@@ -108,7 +108,7 @@ spec:
       securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: manager
-          image: docker.io/iracic82/bnk-runai-tenancy:0.1.5
+          image: docker.io/iracic82/bnk-runai-tenancy:0.1.6
           imagePullPolicy: Always
           args: ["--leader-elect", "--bnk-namespace=f5-bnk", "--vip-range=172.16.201.110-172.16.201.149"]
           # Token metering (config/meter.yaml): add

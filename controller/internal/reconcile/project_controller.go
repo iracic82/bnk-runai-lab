@@ -10,8 +10,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -207,6 +209,9 @@ func (r *ProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&kaiv1alpha1.Project{}).
 		Watches(&kaiv1alpha1.Project{}, handler.EnqueueRequestsFromMapFunc(r.sameNamespace)).
 		Named("runai-project-tenancy").
+		// Failures retry quickly and never wait more than 30s, so a fixed cause (a missing CRD, a
+		// secret, BNK still starting) is picked up without restarting the controller.
+		WithOptions(controller.Options{RateLimiter: workqueue.NewTypedItemExponentialFailureRateLimiter[ctrl.Request](time.Second, 30*time.Second)}).
 		Complete(r)
 }
 
