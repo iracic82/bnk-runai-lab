@@ -55,10 +55,10 @@ W1 (US1+US2), W2 (US3), W5 GTC demo, W3 (US5), W4 (US4), Instruqt, publish. Phas
 
 ## Phase 1: Setup (can start in parallel with Phase 0)
 
-- [ ] T012 Create the repo skeleton per plan.md (`controller/ metering/ charts/ platform/ labctl/ loadgen/ instruqt/ demo/gtc/ docs/`), plus `.gitignore` (excluding `*.jwt`, `*far*`, `.env`) and an Apache-2.0 `LICENSE` at repo root 🟢 pre-spike
-- [ ] T013 [P] Initialize the Go module `github.com/f5devcentral/bnk-runai-tenancy` in `controller/go.mod` (Go 1.24, controller-runtime, client-go), with a `Makefile` providing `build test envtest image` targets 🟢 pre-spike
-- [ ] T014 [P] Create `platform/versions.env` pinning the bnk-ai-kv-lab and bnk-deploy git refs, Run:ai image digests (GAR), fake-gpu-operator, llm-d-inference-sim, kube-prometheus-stack, Gateway API, and GAIE CRD versions (BNK versions left as `TODO-S0`) 🟢 pre-spike
-- [ ] T015 [P] Add `scripts/secret-scan.sh` (gitleaks or a grep for JWT/FAR patterns) and wire it into a pre-commit hook in `.githooks/pre-commit` 🟢 pre-spike
+- [X] T012 Create the repo skeleton per plan.md (`controller/ metering/ charts/ platform/ labctl/ loadgen/ instruqt/ demo/gtc/ docs/`), plus `.gitignore` (excluding `*.jwt`, `*far*`, `.env`) and an Apache-2.0 `LICENSE` at repo root 🟢 pre-spike
+- [X] T013 [P] Initialize the Go module `github.com/f5devcentral/bnk-runai-tenancy` in `controller/go.mod` (Go 1.24, controller-runtime, client-go), with a `Makefile` providing `build test envtest image` targets 🟢 pre-spike
+- [X] T014 [P] Create `platform/versions.env` pinning the bnk-ai-kv-lab and bnk-deploy git refs, Run:ai image digests (GAR), fake-gpu-operator, llm-d-inference-sim, kube-prometheus-stack, Gateway API, and GAIE CRD versions (BNK versions left as `TODO-S0`) 🟢 pre-spike
+- [X] T015 [P] Add `scripts/secret-scan.sh` (gitleaks or a grep for JWT/FAR patterns) and wire it into a pre-commit hook in `.githooks/pre-commit` 🟢 pre-spike
 
 ---
 
@@ -74,7 +74,7 @@ W1 (US1+US2), W2 (US3), W5 GTC demo, W3 (US5), W4 (US4), Instruqt, publish. Phas
 - [ ] T023 Write `platform/install.sh` (runs after cluster setup.sh), orchestrating labels→Run:ai→fake-gpu→observability→shared BNK objects→controller. It must be idempotent and print a per-component status table 🔒 BNK-gated
 - [ ] T024 [P] Write `labctl/labctl` (bash) with subcommand dispatch, `--json` output, cwd-independent paths (`LAB_HOME=/opt/lab`), and the `labctl status` implementation per `contracts/labctl.md` 🟢 pre-spike
 - [ ] T025 [P] Write `loadgen/loadgen.py` (async OpenAI-compatible client; profiles `steady`, `prefix-heavy` (80% shared system prompt), `overload`, `rollout`; a `--seconds` default of 30; per-tenant Host header; prints p50/p95 TTFT and the status code histogram) 🟢 pre-spike
-- [ ] T026 Scaffold the controller manager in `controller/cmd/manager/main.go` (scheme registration for unstructured `kai.resources/v1alpha1` Project/Department and `scheduling.run.ai` Queue, leader election, metrics on `:8080`, health probes) 🟢 pre-spike
+- [X] T026 Scaffold the controller manager in `controller/cmd/manager/main.go` (scheme registration for unstructured `kai.resources/v1alpha1` Project/Department and `scheduling.run.ai` Queue, leader election, metrics on `:8080`, health probes) 🟢 pre-spike
 
 **Checkpoint**: On the spike sandbox, `platform/install.sh` brings up Run:ai, fake GPU, and observability over BNK, and `labctl status` is all green.
 
@@ -91,16 +91,16 @@ removes it within 30 s.
 
 ### Tests for US1
 
-- [ ] T027 [P] [US1] Envtest that installs the Run:ai cluster Project/Department CRDs (`kai.resources`, as shipped in `runai-chart`) (copied to `controller/test/crds/`) and asserts that Project → bundle builder input mapping reads the namespace from `status.namespace`, never from the name, in `controller/test/envtest/project_mapping_test.go` 🟢 pre-spike
-- [ ] T028 [P] [US1] Unit tests for the rate-limit derivation `rps = baseRps × max(deserved, minGpuFactor)`, the override annotation `tenancy.f5.com/rps`, and "Project without a GPU queue gets `rps = base_rps × 0.25` (never unlimited)", in `controller/internal/reconcile/ratelimit_test.go` 🟢 pre-spike
-- [ ] T029 [P] [US1] Unit test for "Two Projects resolving to one namespace → Error state for both, no writes", in `controller/internal/reconcile/conflict_test.go` 🟢 pre-spike
-- [ ] T030 [P] [US1] Envtest for finalizer lifecycle: the `tenancy.f5.com/bundle` finalizer is added on Ready, and on deletion the bundle is deleted before the finalizer is removed, in `controller/test/envtest/finalizer_test.go` 🟢 pre-spike
+- [X] T027 [P] [US1] Envtest that installs the Run:ai cluster Project/Department CRDs (`kai.resources`, as shipped in `runai-chart`) (copied to `controller/test/crds/`) and asserts that Project → bundle builder input mapping reads the namespace from `status.namespace`, never from the name, in `controller/test/envtest/project_mapping_test.go` 🟢 pre-spike
+- [X] T028 [P] [US1] Unit tests for the rate-limit derivation `rps = baseRps × max(deserved, minGpuFactor)`, the override annotation `tenancy.f5.com/rps`, and "Project without a GPU queue gets `rps = base_rps × 0.25` (never unlimited)", in `controller/internal/reconcile/ratelimit_test.go` 🟢 pre-spike
+- [X] T029 [P] [US1] Unit test for "Two Projects resolving to one namespace → Error state for both, no writes", in `controller/internal/reconcile/conflict_test.go` 🟢 pre-spike
+- [X] T030 [P] [US1] Envtest for finalizer lifecycle: the `tenancy.f5.com/bundle` finalizer is added on Ready, and on deletion the bundle is deleted before the finalizer is removed, in `controller/test/envtest/finalizer_test.go` 🟢 pre-spike
 
 ### Implementation for US1
 
-- [ ] T031 [P] [US1] Implement the TenantSpec model (project, department, namespace, gpuDeserved, priority, overrides) plus parsing from unstructured Project/Department in `controller/internal/tenant/tenant.go` 🟢 pre-spike
-- [ ] T032 [P] [US1] Implement the rate-limit and criticality derivations (config `baseRps: 20`, `minGpuFactor: 0.25`, `criticalPriorityThreshold: 100`) in `controller/internal/reconcile/ratelimit.go` 🟢 pre-spike
-- [ ] T033 [US1] Implement ProjectReconciler (watches Project, Department, Queue; waits for Project Ready + `status.namespace`; namespace conflict detection; finalizer `tenancy.f5.com/bundle`; Kubernetes Events on the Project; gauge `bnk_tenant_state{project,state}`) in `controller/internal/reconcile/project_controller.go`, using a `BundleApplier` interface so BNK writes plug in later 🟢 pre-spike
+- [X] T031 [P] [US1] Implement the TenantSpec model (project, department, namespace, gpuDeserved, priority, overrides) plus parsing from unstructured Project/Department in `controller/internal/tenant/tenant.go` 🟢 pre-spike
+- [X] T032 [P] [US1] Implement the rate-limit and criticality derivations (config `baseRps: 20`, `minGpuFactor: 0.25`, `criticalPriorityThreshold: 100`) in `controller/internal/reconcile/ratelimit.go` 🟢 pre-spike
+- [X] T033 [US1] Implement ProjectReconciler (watches Project, Department, Queue; waits for Project Ready + `status.namespace`; namespace conflict detection; finalizer `tenancy.f5.com/bundle`; Kubernetes Events on the Project; gauge `bnk_tenant_state{project,state}`) in `controller/internal/reconcile/project_controller.go`, using a `BundleApplier` interface so BNK writes plug in later 🟢 pre-spike
 - [ ] T034 [US1] Implement BNK bundle builders for listener/GatewaySettings, HTTPRoute (`/v1/*` → InferencePool), and the rate-limit policy, using only names from `docs/verified-names.md`, with common labels `tenancy.f5.com/project`, `tenancy.f5.com/department`, `app.kubernetes.io/managed-by: bnk-runai-tenancy` and annotation `tenancy.f5.com/source`, in `controller/internal/bnk/builders.go` 🔒 BNK-gated
 - [ ] T035 [US1] Implement BundleApplier with server-side apply (field manager `bnk-runai-tenancy`), drift watch on owned kinds, and label-selected deletion, in `controller/internal/bnk/applier.go` 🔒 BNK-gated
 - [ ] T036 [US1] Create RBAC per `contracts/tenancy-controller.md` (get/list/watch Project/Department/Queue/Pod; update Project for the finalizer only; CRUD on BNK kinds + HTTPRoute) and the Deployment, in `controller/config/` 🔒 BNK-gated (BNK kinds)

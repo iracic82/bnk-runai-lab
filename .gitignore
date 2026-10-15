@@ -5,3 +5,13 @@ cne_pull*.json
 .local-dev/
 bin/
 *.log
+*.test
+*.out
+vendor/
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+kubeconfig*
+*.key
+secrets/

@@ -1,0 +1,204 @@
+package reconcile
+
+import (
+	"context"
+	"sync"
+	"testing"
+
+	kaiv1alpha1 "github.com/kai-scheduler/kai-resource-management-api/kai/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+)
+
+// recordingApplier stands in for the BNK side and records what it was asked to do.
+type recordingApplier struct {
+	mu      sync.Mutex
+	applied map[string]Desired
+	deleted []string
+}
+
+func newRecorder() *recordingApplier { return &recordingApplier{applied: map[string]Desired{}} }
+
+func (a *recordingApplier) Apply(_ context.Context, d Desired) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.applied[d.Tenant.Project] = d
+	return nil
+}
+
+func (a *recordingApplier) Delete(_ context.Context, project string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.applied, project)
+	a.deleted = append(a.deleted, project)
+	return nil
+}
+
+type memGauge map[string]string
+
+func (g memGauge) Set(p, s string)  { g[p] = s }
+func (g memGauge) Forget(p string) { delete(g, p) }
+
+func readyProject(name, ns string, gpu float64, prio int32) *kaiv1alpha1.Project {
+	return &kaiv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: kaiv1alpha1.ProjectSpec{Parent: "acme", Queues: []kaiv1alpha1.QueueConfig{{
+			Name: name, Nodepool: "default", Priority: &prio,
+			Resources: &kaiv1alpha1.QueueResourcesConfig{GPU: kaiv1alpha1.SystemResource{Deserved: gpu}},
+		}}},
+		Status: kaiv1alpha1.ProjectStatus{Namespace: ns, Phase: kaiv1alpha1.Ready},
+	}
+}
+
+func setup(t *testing.T, objs ...client.Object) (*ProjectReconciler, *recordingApplier, memGauge) {
+	t.Helper()
+	s := runtime.NewScheme()
+	if err := kaiv1alpha1.AddToScheme(s); err != nil {
+		t.Fatal(err)
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(objs...).
+		WithStatusSubresource(&kaiv1alpha1.Project{}).Build()
+	a, g := newRecorder(), memGauge{}
+	return &ProjectReconciler{Client: c, Applier: a, Policy: DefaultPolicy(), State: g}, a, g
+}
+
+func reconcileOnce(t *testing.T, r *ProjectReconciler, name string) ctrl.Result {
+	t.Helper()
+	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: name}})
+	if err != nil {
+		t.Fatalf("reconcile %s: %v", name, err)
+	}
+	return res
+}
+
+func TestProjectBecomesTenant(t *testing.T) {
+	r, a, g := setup(t, readyProject("tenant-a", "runai-tenant-a", 2, 150))
+	reconcileOnce(t, r, "tenant-a")
+
+	d, ok := a.applied["tenant-a"]
+	if !ok {
+		t.Fatal("no BNK tenant applied for tenant-a")
+	}
+	if d.Tenant.Namespace != "runai-tenant-a" || d.Tenant.Department != "acme" {
+		t.Errorf("tenant = %+v", d.Tenant)
+	}
+	if d.RateLimit != 40 || d.Criticality != "Critical" {
+		t.Errorf("limit/criticality = %v/%v, want 40/Critical", d.RateLimit, d.Criticality)
+	}
+	if g["tenant-a"] != StateServing {
+		t.Errorf("state = %q", g["tenant-a"])
+	}
+	var p kaiv1alpha1.Project
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "tenant-a"}, &p)
+	if !controllerutil.ContainsFinalizer(&p, Finalizer) {
+		t.Error("finalizer not added")
+	}
+}
+
+func TestQuotaChangeUpdatesLimit(t *testing.T) {
+	r, a, _ := setup(t, readyProject("tenant-b", "runai-tenant-b", 0.5, 50))
+	reconcileOnce(t, r, "tenant-b")
+	if a.applied["tenant-b"].RateLimit != 10 {
+		t.Fatalf("initial limit = %v", a.applied["tenant-b"].RateLimit)
+	}
+
+	var p kaiv1alpha1.Project
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "tenant-b"}, &p)
+	p.Spec.Queues[0].Resources.GPU.Deserved = 1
+	if err := r.Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, "tenant-b")
+	if a.applied["tenant-b"].RateLimit != 20 {
+		t.Errorf("limit after quota change = %v, want 20", a.applied["tenant-b"].RateLimit)
+	}
+}
+
+func TestNotReadyIsRequeued(t *testing.T) {
+	p := readyProject("tenant-a", "", 2, 150)
+	p.Status.Phase = kaiv1alpha1.NotReady
+	r, a, g := setup(t, p)
+	res := reconcileOnce(t, r, "tenant-a")
+	if res.RequeueAfter == 0 || len(a.applied) != 0 || g["tenant-a"] != StatePending {
+		t.Errorf("res=%+v applied=%v state=%q", res, a.applied, g["tenant-a"])
+	}
+}
+
+func TestDeleteRemovesTenant(t *testing.T) {
+	p := readyProject("tenant-b", "runai-tenant-b", 0.5, 50)
+	p.Finalizers = []string{Finalizer}
+	r, a, g := setup(t, p)
+	reconcileOnce(t, r, "tenant-b")
+
+	if err := r.Delete(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, "tenant-b")
+	if len(a.deleted) != 1 || a.deleted[0] != "tenant-b" {
+		t.Errorf("deleted = %v", a.deleted)
+	}
+	if _, ok := g["tenant-b"]; ok {
+		t.Error("state should be forgotten after delete")
+	}
+	var gone kaiv1alpha1.Project
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "tenant-b"}, &gone); err == nil {
+		t.Error("project should be gone once the finalizer is released")
+	}
+}
+
+func TestNamespaceConflictWritesNothing(t *testing.T) {
+	r, a, g := setup(t, readyProject("x", "runai-shared", 1, 50), readyProject("y", "runai-shared", 1, 50))
+	reconcileOnce(t, r, "x")
+	reconcileOnce(t, r, "y")
+	if len(a.applied) != 0 {
+		t.Errorf("no BNK config may be written on conflict, got %v", a.applied)
+	}
+	if g["x"] != StateError || g["y"] != StateError {
+		t.Errorf("states = %v", g)
+	}
+}
+
+func TestBadAnnotationIsAnErrorNotACrash(t *testing.T) {
+	p := readyProject("tenant-a", "runai-tenant-a", 2, 150)
+	p.Annotations = map[string]string{"tenancy.f5.com/rps": "fast"}
+	r, a, g := setup(t, p)
+	reconcileOnce(t, r, "tenant-a")
+	if len(a.applied) != 0 || g["tenant-a"] != StateError {
+		t.Errorf("applied=%v state=%q", a.applied, g["tenant-a"])
+	}
+}
+
+func TestSkipReleasesTenant(t *testing.T) {
+	r, a, _ := setup(t, readyProject("tenant-a", "runai-tenant-a", 2, 150))
+	reconcileOnce(t, r, "tenant-a")
+
+	var p kaiv1alpha1.Project
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "tenant-a"}, &p)
+	p.Annotations = map[string]string{"tenancy.f5.com/skip": "true"}
+	if err := r.Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, "tenant-a")
+	if _, ok := a.applied["tenant-a"]; ok {
+		t.Error("skipped project must have no BNK tenant")
+	}
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "tenant-a"}, &p)
+	if controllerutil.ContainsFinalizer(&p, Finalizer) {
+		t.Error("finalizer should be released for a skipped project")
+	}
+}
+
+func TestReconcileIsIdempotent(t *testing.T) {
+	r, a, _ := setup(t, readyProject("tenant-a", "runai-tenant-a", 2, 150))
+	for i := 0; i < 3; i++ {
+		reconcileOnce(t, r, "tenant-a")
+	}
+	if len(a.applied) != 1 || len(a.deleted) != 0 {
+		t.Errorf("applied=%v deleted=%v", a.applied, a.deleted)
+	}
+}
