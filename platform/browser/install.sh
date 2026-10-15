@@ -17,8 +17,9 @@ cat > /opt/lab-browser/policies/policies.json <<POL
 {"policies":{
   "Homepage":{"URL":"https://${DOMAIN}","StartPage":"homepage"},
   "Certificates":{"Install":["/lab-ca/ca.crt"],"ImportEnterpriseRoots":true},
-  "DisableFirstRunPage":true,"OverrideFirstRunPage":"","DontCheckDefaultBrowser":true,
-  "DisableTelemetry":true,"NoDefaultBookmarks":true
+  "DisableFirstRunPage":true,"OverrideFirstRunPage":"","OverridePostUpdatePage":"","DontCheckDefaultBrowser":true,
+  "DisableTelemetry":true,"NoDefaultBookmarks":true,"DisplayBookmarksToolbar":"never",
+  "UserMessaging":{"WhatsNew":false,"ExtensionRecommendations":false,"FeatureRecommendations":false,"SkipOnboarding":true}
 }}
 POL
 
