@@ -38,6 +38,8 @@ step() { echo "==== $(date +%H:%M:%S) $*"; }
   kubectl -n bnk-runai-tenancy rollout status deploy/bnk-runai-meter --timeout=300s
   step "NVIDIA Dynamo platform (operator + NATS) for challenge 5"
   bash "$LAB_ROOT/platform/dynamo/install.sh"
+  step "MCP servers: NVIDIA runai-mcp-server + bnk-tenancy-mcp"
+  bash "$LAB_ROOT/platform/mcp/install.sh"
   step "Prometheus + Grafana"
   bash "$LAB_ROOT/platform/observability/install.sh"
   step "interactive lab topology"
