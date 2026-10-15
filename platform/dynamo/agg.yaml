@@ -1,5 +1,5 @@
 # Dynamo aggregated serving, GPU-free: 1 frontend (KV-aware router) + 2 Mocker decode workers.
-# Plain Deployments, no Dynamo operator. Every pod is scheduled by Run:ai (kai-scheduler, queue
+# Plain Deployments, no Dynamo operator. Every pod is scheduled by Run:ai (runai-scheduler, queue
 # "dynamo"); the workers each take half of a simulated A10.
 # Image and flags are from ai-dynamo/dynamo v1.5.1, see docs/dynamo-research.md.
 apiVersion: apps/v1
@@ -15,11 +15,11 @@ spec:
       labels:
         app: dynamo-frontend
         dynamo.role: frontend
-        kai.scheduler/queue: dynamo
+        runai/queue: dynamo
         # The tenant's InferencePool selects this label, so BNK's pool points at the Dynamo frontend.
         app.kubernetes.io/part-of: model-server
     spec:
-      schedulerName: kai-scheduler
+      schedulerName: runai-scheduler
       nodeSelector: {app: workload}
       containers:
       - name: frontend
@@ -67,12 +67,12 @@ spec:
       labels:
         app: dynamo-decode
         dynamo.role: worker
-        kai.scheduler/queue: dynamo
+        runai/queue: dynamo
       annotations:
         # Run:ai GPU sharing: half of one simulated A10 per worker.
         gpu-fraction: "0.5"
     spec:
-      schedulerName: kai-scheduler
+      schedulerName: runai-scheduler
       nodeSelector: {app: workload}
       containers:
       - name: mocker

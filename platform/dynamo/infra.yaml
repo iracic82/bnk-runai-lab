@@ -11,9 +11,9 @@ spec:
   selector: {matchLabels: {app: dynamo-etcd}}
   template:
     metadata:
-      labels: {app: dynamo-etcd, app.kubernetes.io/part-of: dynamo-runtime, kai.scheduler/queue: dynamo}
+      labels: {app: dynamo-etcd, app.kubernetes.io/part-of: dynamo-runtime, runai/queue: dynamo}
     spec:
-      schedulerName: kai-scheduler
+      schedulerName: runai-scheduler
       nodeSelector: {app: workload}
       containers:
       - name: etcd
@@ -52,9 +52,9 @@ spec:
   selector: {matchLabels: {app: dynamo-nats}}
   template:
     metadata:
-      labels: {app: dynamo-nats, app.kubernetes.io/part-of: dynamo-runtime, kai.scheduler/queue: dynamo}
+      labels: {app: dynamo-nats, app.kubernetes.io/part-of: dynamo-runtime, runai/queue: dynamo}
     spec:
-      schedulerName: kai-scheduler
+      schedulerName: runai-scheduler
       nodeSelector: {app: workload}
       containers:
       - name: nats

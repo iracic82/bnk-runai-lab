@@ -16,11 +16,11 @@ spec:
         app: dynamo-prefill
         dynamo.role: worker
         dynamo.stage: prefill
-        kai.scheduler/queue: dynamo
+        runai/queue: dynamo
       annotations:
         gpu-fraction: "0.5"
     spec:
-      schedulerName: kai-scheduler
+      schedulerName: runai-scheduler
       nodeSelector: {app: workload}
       containers:
       - name: mocker
@@ -63,11 +63,11 @@ spec:
         app: dynamo-decode
         dynamo.role: worker
         dynamo.stage: decode
-        kai.scheduler/queue: dynamo
+        runai/queue: dynamo
       annotations:
         gpu-fraction: "0.5"
     spec:
-      schedulerName: kai-scheduler
+      schedulerName: runai-scheduler
       nodeSelector: {app: workload}
       containers:
       - name: mocker

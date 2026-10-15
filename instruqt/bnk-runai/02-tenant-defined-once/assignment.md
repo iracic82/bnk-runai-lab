@@ -82,7 +82,7 @@ for t in tenant-a tenant-b; do
 done
 ```
 
-Both pods run on the `gpu` node, each with `gpu-fraction: 0.5`, placed by `kai-scheduler`, the Run:ai
+Both pods run on the `gpu` node, each with `gpu-fraction: 0.5`, placed by `runai-scheduler`, the Run:ai
 scheduler. Two tenants now share one physical GPU. That is good for utilisation, and it is exactly why
 the next challenge matters: whoever sends more requests gets more of that GPU, unless something stops
 them first.

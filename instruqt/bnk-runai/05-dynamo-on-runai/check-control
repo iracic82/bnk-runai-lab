@@ -18,9 +18,9 @@ if ! kubectl -n "$NS" get pods -l app=dynamo-frontend --field-selector=status.ph
   exit 1
 fi
 
-others=$(kubectl -n "$NS" get pods -l dynamo.role=worker -o jsonpath='{range .items[*]}{.spec.schedulerName}{"\n"}{end}' | grep -vc '^kai-scheduler$' || true)
+others=$(kubectl -n "$NS" get pods -l dynamo.role=worker -o jsonpath='{range .items[*]}{.spec.schedulerName}{"\n"}{end}' | grep -vc '^runai-scheduler$' || true)
 if [ "$others" -ne 0 ]; then
-  fail-message "Some Dynamo workers were not scheduled by the Run:ai scheduler (kai-scheduler)."
+  fail-message "Some Dynamo workers were not scheduled by the Run:ai scheduler (runai-scheduler)."
   exit 1
 fi
 
