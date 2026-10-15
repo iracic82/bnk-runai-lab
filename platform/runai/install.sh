@@ -35,6 +35,9 @@ set --
 # shellcheck disable=SC1090
 . "$_ld"; rm -f "$_ld"
 set +e; set -uo pipefail   # local-dev.sh sets -e; the helpers below handle their own retries
+# check_prereqs (skipped here, it is Kind-specific) sets OS and ARCH through detect_os_arch;
+# deploy_runai_cluster reads OS, so call NVIDIA's function directly.
+detect_os_arch
 # Point every image at Docker Hub instead of Kind's localhost:5001 registry.
 REGISTRY_PORT=""; LOCAL_IMAGE_REPO=""
 registry() { printf '%s' "$RUNAI_IMAGE_REGISTRY"; }
