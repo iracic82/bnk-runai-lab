@@ -4,7 +4,8 @@
 # /root/runai-images.txt. Needs DOCKERHUB_TOKEN in the environment (never echoed).
 set -euo pipefail
 DOCKERHUB_USER="${DOCKERHUB_USER:-iracic82}"
-PREFIX="${IMAGE_PREFIX:-runai-oss-}"
+# Run:ai charts compose images as <registry>/<service>:<tag>, so names must stay exactly as built.
+PREFIX="${IMAGE_PREFIX:-}"
 REG=localhost:5001
 OUT=/root/runai-images.txt
 [ -n "${DOCKERHUB_TOKEN:-}" ] || { echo "DOCKERHUB_TOKEN is not set (it is an Instruqt secret; check: env | grep -c DOCKERHUB_TOKEN)" >&2; exit 1; }

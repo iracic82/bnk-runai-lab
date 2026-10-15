@@ -11,7 +11,7 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 RUNAI_REF="${RUNAI_REF:-59e288d7}"
 DOCKERHUB_USER="${DOCKERHUB_USER:-iracic82}"
-PREFIX="${IMAGE_PREFIX:-runai-oss-}"
+PREFIX="${IMAGE_PREFIX:-}"
 WORK=/root/runai-build
 LOG=/root/runai-build.log
 step() { echo; echo "==== $(date -u +%H:%M:%S) $*"; }

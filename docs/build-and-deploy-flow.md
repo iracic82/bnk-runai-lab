@@ -9,7 +9,7 @@ We split that in two: a one-off **builder** that compiles and publishes the imag
 which only pulls them.
 
 ```
-builder sandbox ──compile once──▶ Docker Hub (iracic82/runai-oss-*)
+builder sandbox ──compile once──▶ Docker Hub (iracic82/<service>)
                                           │ pull
                                           ▼
  lab sandbox: real BNK 2.4 cluster ──▶ helm install Run:ai control plane + cluster chart
@@ -20,7 +20,7 @@ builder sandbox ──compile once──▶ Docker Hub (iracic82/runai-oss-*)
 |---|---|---|
 | Purpose | Compile Run:ai once, push the images to Docker Hub | What learners and the GTC demo use |
 | Cluster | Throwaway Kind cluster inside one VM, only to prove the images start | Real kubeadm cluster with BNK 2.4 (control-plane, dpu, gpu, runai nodes) |
-| Run:ai | Built from source with NVIDIA's `local-dev.sh` | Pulled ready-made from `iracic82/runai-oss-*`, nothing compiled |
+| Run:ai | Built from source with NVIDIA's `local-dev.sh` | Pulled ready-made from `iracic82/<service>`, nothing compiled |
 | Lifetime | Thrown away once the images are pushed | Every lab sandbox |
 
 ## Builder
@@ -30,7 +30,7 @@ builder sandbox ──compile once──▶ Docker Hub (iracic82/runai-oss-*)
 - Script: `image-build/build-and-publish.sh` runs `local-dev.sh` (compile about 50 services, deploy on
   Kind with fake GPUs as a smoke test).
 - `image-build/publish-images.sh` copies every `localhost:5001/runai-local/<service>:<tag>` image to
-  `docker.io/iracic82/runai-oss-<service>:<tag>` and lists them in `/root/runai-images.txt`.
+  `docker.io/iracic82/<service>:<tag>` and lists them in `/root/runai-images.txt`.
 - Needs the Instruqt team secret `DOCKERHUB_TOKEN`. It reaches the script through the environment
   only.
 - Disk is the reason for the host image: NVIDIA asks for 100 GB free. One build leaves about 44 GB
@@ -44,7 +44,7 @@ The lab installs the same two Helm charts `local-dev.sh` uses, with the image re
 Docker Hub instead of the local registry:
 
 1. **Control plane** (`control-plane/control-plane-chart`, release `runai-backend`, namespace
-   `runai-backend`) with `global.image.registry=docker.io/iracic82` and a `runai-oss-` name prefix.
+   `runai-backend`) with `global.image.registry=docker.io/iracic82` (charts compose `<registry>/<service>:<tag>`, so images keep their built names).
 2. **Register the cluster** through the control-plane API (Keycloak token, then
    `POST /v1/k8s/clusters`, then `GET /api/v1/clusters/<uuid>/cluster-install-info` for the
    bootstrap token). These are the same calls `local-dev.sh` makes in `provision_cluster_credentials`.
