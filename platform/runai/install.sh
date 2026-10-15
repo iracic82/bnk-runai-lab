@@ -83,6 +83,9 @@ CP_CLUSTER_NAME=acme-ai-factory
 provision_cluster_credentials
 
 step "Run:ai cluster chart (scheduler + resource management)"
+# runai-operator watches ServiceMonitor/PodMonitor/PrometheusRule and exits if their CRDs are absent
+# (NVIDIA's local-dev cluster ships them; ours gets them here, Prometheus itself comes later).
+kubectl apply --server-side -f "https://github.com/prometheus-operator/prometheus-operator/releases/download/${PROMETHEUS_OPERATOR_VERSION:-v0.79.2}/stripped-down-crds.yaml"
 use_hub_registry deploy_runai_cluster
 # A release left by a failed install carries its old image names; its uninstall hooks would run
 # with them and hang. Remove it without hooks so NVIDIA's function starts from a clean slate.

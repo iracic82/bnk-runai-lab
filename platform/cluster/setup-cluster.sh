@@ -297,6 +297,10 @@ sed -i -E \
   -e 's/^BNK_NETWORK_ATTACHMENTS= +#.*$/BNK_NETWORK_ATTACHMENTS="${BNK_NETWORK_ATTACHMENTS:-}"/' \
   -e 's/^BNK_TMM_MTU=1500$/BNK_TMM_MTU="${BNK_TMM_MTU:-1500}"/' \
   "${REPO_ROOT}/profiles/host.env"
+# The Endpoint Picker watches Services in every BNK_EPP_NAMESPACES entry from startup; a missing
+# namespace leaves its cache unsynced and the f5-cne-controller restarts forever (seen live 2026-10-15).
+# Run:ai adopts these namespaces when the projects are created in challenge 2.
+for ns in ${BNK_EPP_NAMESPACES//,/ }; do kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -; done
 "$INSTALLER" --env lab --profile host --skip-license || fail "the BNK install did not complete"
 # Belt and braces: confirm the attachments actually landed on the CNEInstance (this is what was silently
 # missing before), and patch them in if not - the operator then re-renders TMM with both macvlan legs.

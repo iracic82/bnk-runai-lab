@@ -1,0 +1,77 @@
+# Dynamo runtime services, one replica each, no GPU, no persistence.
+# Without the Dynamo operator, workers find each other through etcd (discovery) and publish
+# KV events over NATS (event plane). See docs/dynamo-research.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dynamo-etcd
+  labels: {app: dynamo-etcd, app.kubernetes.io/part-of: dynamo-runtime}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: dynamo-etcd}}
+  template:
+    metadata:
+      labels: {app: dynamo-etcd, app.kubernetes.io/part-of: dynamo-runtime}
+    spec:
+      nodeSelector: {app: workload}
+      containers:
+      - name: etcd
+        image: quay.io/coreos/etcd:v3.5.18
+        command:
+        - etcd
+        - --name=dynamo-etcd
+        - --data-dir=/var/lib/etcd
+        - --listen-client-urls=http://0.0.0.0:2379
+        - --advertise-client-urls=http://dynamo-etcd:2379
+        - --listen-peer-urls=http://0.0.0.0:2380
+        ports: [{name: client, containerPort: 2379}]
+        readinessProbe:
+          httpGet: {path: /health, port: 2379}
+          periodSeconds: 5
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}
+        volumeMounts: [{name: data, mountPath: /var/lib/etcd}]
+      volumes: [{name: data, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dynamo-etcd
+spec:
+  selector: {app: dynamo-etcd}
+  ports: [{name: client, port: 2379, targetPort: 2379}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dynamo-nats
+  labels: {app: dynamo-nats, app.kubernetes.io/part-of: dynamo-runtime}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: dynamo-nats}}
+  template:
+    metadata:
+      labels: {app: dynamo-nats, app.kubernetes.io/part-of: dynamo-runtime}
+    spec:
+      nodeSelector: {app: workload}
+      containers:
+      - name: nats
+        image: nats:2.11.4
+        # JetStream on, as in upstream dev/docker-compose.yml; 8222 is the monitoring port.
+        args: ["-js", "-m", "8222", "--max_payload", "15728640"]
+        ports:
+        - {name: client, containerPort: 4222}
+        - {name: monitor, containerPort: 8222}
+        readinessProbe:
+          httpGet: {path: /healthz, port: 8222}
+          periodSeconds: 5
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dynamo-nats
+spec:
+  selector: {app: dynamo-nats}
+  ports: [{name: client, port: 4222, targetPort: 4222}]
