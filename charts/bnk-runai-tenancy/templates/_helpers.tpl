@@ -54,5 +54,5 @@ app.kubernetes.io/component: meter
 {{- end }}
 
 {{- define "bnk-runai-tenancy.image" -}}
-{{- printf "%s:%s" .repository (toString .tag) }}
+{{- if .digest }}{{ printf "%s@%s" .repository .digest }}{{ else }}{{ printf "%s:%s" .repository (toString .tag) }}{{ end }}
 {{- end }}
