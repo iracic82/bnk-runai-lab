@@ -56,6 +56,9 @@ metadata:
   labels: {app: dynamo-decode, dynamo.role: worker}
 spec:
   replicas: 1
+  # Stop the old decode worker before starting this one: a rolling update needs a second half-GPU for a
+  # moment, which the project's quota may not have (seen live: the new pod sat Pending).
+  strategy: {type: Recreate}
   selector: {matchLabels: {app: dynamo-decode}}
   template:
     metadata:

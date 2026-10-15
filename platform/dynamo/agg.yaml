@@ -61,6 +61,8 @@ metadata:
   labels: {app: dynamo-decode, dynamo.role: worker}
 spec:
   replicas: 2
+  # Old decode workers stop before new ones start, so switching agg <-> disagg never needs extra GPU.
+  strategy: {type: Recreate}
   selector: {matchLabels: {app: dynamo-decode}}
   template:
     metadata:
