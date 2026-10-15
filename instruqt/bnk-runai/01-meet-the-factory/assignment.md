@@ -11,10 +11,23 @@ notes:
 - type: image
   url: ../assets/notes-01-real.png
 tabs:
-- id: leytwskwjamw
+- id: yu2uqgpy76yf
   title: Terminal
   type: terminal
   hostname: control
+- id: muyniiuokbjw
+  title: Lab code
+  type: code
+  hostname: control
+  path: /root/lab
+- id: hkgsqpgyzxeq
+  title: GPU node
+  type: terminal
+  hostname: gpu
+- id: mx8qyln7lpej
+  title: DPU node
+  type: terminal
+  hostname: dpu
 difficulty: basic
 timelimit: 1800
 enhanced_loading: null
@@ -23,6 +36,9 @@ Here is the stack you are about to explore. NVIDIA's Run:ai layers are in green 
 layer in red, and the controller that joins them in yellow. Each layer shows the node it runs on.
 
 ![BNK in the Run:ai architecture](../assets/01-architecture.png)
+
+The **Lab code** tab shows the controller and install scripts you are running. The **GPU node** and
+**DPU node** tabs are shells on those machines, if you want to look around.
 
 # The cluster
 
