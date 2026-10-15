@@ -5,14 +5,17 @@
 
 ## Summary
 
-A new Instruqt track, plus a GTC Berlin demo from the same code. It shows that a tenant
-defined once in Run:ai (a Run:ai Project) gets a full BNK 2.4 data-path
-contract automatically: front door, rate limit from GPU quota, model-aware routing to
-the replicas the Run:ai Scheduler placed, priority enforcement aligned with Run:ai preemption, token
-metering, safe rollout, and egress identity. Everything runs as real software; only
-GPUs and model inference are simulated (fake-gpu-operator, llm-d-inference-sim). The
-glue is a small Apache 2.0 **tenancy controller** (Go, controller-runtime), which is
-also the artifact NVIDIA needs to list F5.
+This plan implements Santosh's engineering brief (2026-10-14). BNK consumes Run:ai's tenant
+model: a project defined once in Run:ai becomes a BNK tenant (W1), tokens are metered per
+Run:ai project (W2), the controller and metering ship as one Helm chart beside the Run:ai
+chart with a validation matrix (W3), and telemetry is shaped for Workload Map (W4). It all
+comes together in an 8-minute GTC demo (W5). The integration is operational and never
+touches the BNK data plane.
+
+BNK's Endpoint Picker in front of Run:ai inference pods is the **baseline** ("already
+compatible"), not the integration. Everything runs as real software on the reused real BNK
+2.4 cluster plus a Run:ai VM. Only GPUs and inference are simulated in Instruqt. The DPU and
+host-CPU claims come from the BlueField-3 partner cluster.
 
 ## Technical Context
 
@@ -48,7 +51,7 @@ must be in BNK_EPP_NAMESPACES at install time; GTC demo recorded by 2026-10-19
 | I Real software, simulated hardware | ✅ | BNK 2.4 real, full Run:ai real; only GPUs/inference simulated (R2, R3, R5) |
 | II Verified names only | ⚠️ partial | Run:ai/KAI names verified (`docs/verified-names.md`); BNK 2.4 names gated by spike S0 |
 | III Tenant defined once | ✅ | Controller derives the whole BNK tenant bundle from Project+Queue (data-model) |
-| IV Every feature earns its place | ✅ | R6 mapping table: each BNK feature tied to a Run:ai trigger |
+| IV Every feature earns its place | ✅ | Scope = the brief's W1–W5; out-of-brief features moved to optional extras |
 | V Instruqt-ready | ✅ | Prebaked image, labctl, check/solve per challenge, secrets via Instruqt (R8, R9) |
 | VI Honest claims | ✅ | DPU/host-CPU/Workload Map/GPU isolation marked architecture-only; metering fallback disclosed (R7) |
 
@@ -65,22 +68,31 @@ verifies BNK 2.4 CR names. No code may use an unverified BNK name before that.
 | **P3 Instruqt image + track** (after GTC) | Packer image, labctl, challenges C1–C7 | SC-005, SC-006 |
 | **P4 Stretch + publish** | C8 P/D, public controller repo, Helm chart, validation matrix | Brief W3 packet |
 
-## Track Outline (the "appealing" part)
+## Brief Workstreams → Phases
 
-| # | Challenge | Run:ai moment | BNK 2.4 shines by… | Wow moment on screen |
-|---|---|---|---|---|
-| C1 | Meet the AI Factory | Run:ai UI + fake GPUs, department `acme` | BNK installed and idle | `kubectl get nodes` shows GPUs that cost nothing |
-| C2 | One tenant, defined once | Create Projects `prod-chat` (2 GPU) and `research` (0.5 GPU) | Controller creates listeners, routes, rate limits | BNK objects appear, labelled with Run:ai project. Delete one, and they vanish |
-| C3 | Fractions behind one door | Run:ai packs replicas onto GPU fractions | InferencePool + Endpoint Picker, KV-prefix affinity | Side-by-side TTFT: round-robin vs EPP |
-| C4 | Same priority, both planes | Run:ai preempts research under contention | InferenceObjective sheds research, protects prod | prod p95 flat while research degrades gracefully |
-| C5 | Who used the tokens? | Queue allocation per project | Per-project metering | Tokens per project next to GPU per project |
-| C6 | Ship v2 without fear | Run:ai deploys `chat-v2` | InferenceModelRewrite 90/10 → 0/100 | Clients unchanged, zero errors |
-| C7 | Every tenant, its own exit | Project namespace pulls models | EgressGateway per-namespace SNAT | Model hub log shows one IP per tenant |
-| C8* | Disaggregated serving | Run:ai gang-schedules prefill + decode | P/D-aware routing | Prefill and decode served by different pools |
+| Brief | Scope (demo) | Phase | Stories |
+|---|---|---|---|
+| W1 Tenancy controller | Project → tenant, ingress VS, rate limit from Queue quota | P1 | US1, US2 |
+| W2 Token metering | `bnk_tokens_total{project,department,model,direction}` + Grafana | P1 | US3 |
+| W3 DSX packaging | Helm chart beside the Run:ai chart, validation matrix | P2 | US5 |
+| W4 Workload Map telemetry | Grafana + documented schema (format not public) | P2 | US4 |
+| W5 Demo build + rehearsal | 8-step script, recorded, under 8 min | P2 | D1 |
 
-Debrief: architecture slide with the request path. DPU/BlueField-3 and host-CPU
-savings are shown as **architecture + recorded GPU-cluster demo**, not as a live
-result.
+## Track / Demo Outline (follows the brief's 8 steps)
+
+| Brief step | Instruqt challenge | What the audience sees |
+|---|---|---|
+| 1 Cluster, Run:ai from open-source chart | C1 Meet the AI factory | GPU (+DPU on hardware) nodes; Run:ai UI |
+| 2 Create tenant-a (2 GPU), tenant-b (0.5 GPU) | C2 Tenant defined once | Projects in Run:ai UI; their queues |
+| 3 One inference workload each, fractions on one node | C2 | Both pods on one GPU |
+| 4 BNK tenants appeared automatically | C2 | BNK objects labelled with the Run:ai project |
+| 5 tenant-b throttled, tenant-a unaffected | C3 Isolation before the GPU | 429s for tenant-b only |
+| 6 `bnk_tokens_total` beside GPU usage | C4 Tokens per project | Grafana, one row per project |
+| 7 Host CPU flat, DPU doing ingress | C5 Debrief (architecture) | Recording from the BlueField-3 cluster |
+| 8 Delete tenant-b, BNK forgets it | C2/C5 | Objects and endpoint disappear |
+| Baseline | C3 side note | Endpoint Picker over Run:ai pods; EPP+Dynamo doc |
+
+Optional extras (Instruqt only, after D1–D3): priority shedding, v2 rollout, egress per project.
 
 ## Project Structure
 

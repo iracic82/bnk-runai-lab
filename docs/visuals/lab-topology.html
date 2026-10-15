@@ -1,0 +1,147 @@
+<title>BNK in the Run:ai Architecture</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: NVIDIA's own layered Run:ai stack, with the F5 BNK service plane and the bridge inserted; VM tag on each layer. */
+:root{
+  --bg:#ffffff; --ink:#16191f; --muted:#5d6470; --line:#d9dde3; --card:#f4f5f7;
+  --nv:#76b900; --nv-band:#a9d46b; --nv-soft:#eef6e2; --nv-ink:#2f4a05;
+  --dark:#3a3a3a; --dark-ink:#ffffff; --dark-muted:#c9c9c9;
+  --f5:#e4002b; --f5-soft:#fde8ec; --f5-ink:#8f0019;
+  --bridge:#fff6dc; --bridge-line:#d9a400;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121417; --ink:#eceef2; --muted:#a2a9b5; --line:#2e333b; --card:#1b1e23;
+  --nv-band:#4f7a14; --nv-soft:#1f2a12; --nv-ink:#cfe9a6;
+  --dark:#2a2c30; --dark-muted:#b9bcc2;
+  --f5-soft:#3a141c; --f5-ink:#ffb3c0; --bridge:#2f2810; --bridge-line:#d9a400; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121417; --ink:#eceef2; --muted:#a2a9b5; --line:#2e333b; --card:#1b1e23;
+  --nv-band:#4f7a14; --nv-soft:#1f2a12; --nv-ink:#cfe9a6;
+  --dark:#2a2c30; --dark-muted:#b9bcc2;
+  --f5-soft:#3a141c; --f5-ink:#ffb3c0; --bridge:#2f2810; --bridge-line:#d9a400; color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans)}
+.wrap{max-width:1000px;margin:0 auto;padding-block:28px 48px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:10px}
+h1{font:700 26px/1.2 var(--sans);text-align:center;margin:0;text-wrap:balance}
+.sub{text-align:center;color:var(--muted);margin:0 0 10px}
+.layer{border:1px solid var(--line);border-radius:10px;overflow:hidden;position:relative}
+.head{padding:9px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.head b{font-weight:700;letter-spacing:.04em;text-transform:uppercase;font-size:13.5px}
+.head small{font-size:12px;opacity:.85}
+.vm{font:500 11.5px var(--mono);padding:3px 8px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+.cells{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.cell{padding:12px 14px;border-left:1px solid var(--line);min-width:0}
+.cell:first-child{border-left:0}
+.cell b{display:block;font-size:13px;margin-bottom:3px}
+.cell span{font-size:12px;color:var(--muted)}
+.users .head{background:var(--card)} .users{background:var(--card)}
+.cp{border-color:var(--nv)} .cp .head{background:var(--nv-band);color:#14210a} .cp .cells{background:var(--nv-soft)}
+.cp .cell{border-color:color-mix(in srgb,var(--nv) 35%,transparent)}
+.cs{background:var(--dark);border-color:var(--dark)} .cs .head{color:var(--dark-ink)} .cs .cell{border-color:#555}
+.cs .cell b{color:var(--dark-ink)} .cs .cell span{color:var(--dark-muted)} .cs .vm{color:var(--dark-muted)}
+.gpu{border-color:var(--nv)} .gpu .head{background:var(--nv-soft);color:var(--nv-ink)} .gpu .cells{background:var(--bg)}
+.f5{border:2px solid var(--f5)} .f5 .head{background:var(--f5);color:#fff} .f5 .cells{background:var(--f5-soft)}
+.f5 .cell{border-color:color-mix(in srgb,var(--f5) 30%,transparent)} .f5 .cell b{color:var(--f5-ink)}
+.bridge{background:var(--bridge);border:1.5px dashed var(--bridge-line);border-radius:10px;padding:10px 14px;
+  display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.bridge b{font-size:13.5px}.bridge span{font-size:12.5px;color:var(--muted)}
+.hl{outline:2px solid var(--f5);outline-offset:-2px;border-radius:4px}
+.new{font:600 10px var(--mono);letter-spacing:.08em;color:#fff;background:var(--f5);padding:2px 6px;border-radius:4px;margin-left:6px;vertical-align:2px}
+.sim{font:500 10.5px var(--mono);color:var(--muted);border:1px dashed var(--muted);padding:1px 5px;border-radius:4px;margin-left:4px;white-space:nowrap}
+.join{height:14px;display:flex;justify-content:center}
+.join i{width:2px;background:var(--nv)}
+.join.red i{background:var(--f5)}
+.flows{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+@media (max-width:640px){.flows{grid-template-columns:1fr}}
+.flow{border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:grid;gap:6px}
+.flow h3{margin:0;font-size:14px}
+.flow ol{margin:0;padding-left:18px;color:var(--muted);font-size:13px;display:grid;gap:3px}
+.flow.a{border-top:4px solid var(--nv)} .flow.r{border-top:4px solid var(--f5)}
+.key{display:flex;flex-wrap:wrap;gap:16px;justify-content:center;font-size:12.5px;color:var(--muted);margin-top:6px}
+</style>
+
+<div class="wrap">
+  <h1>Where F5 BNK sits in the Run:ai architecture</h1>
+  <p class="sub">NVIDIA's Run:ai stack, with what this lab adds in red. Each layer shows the lab VM it runs on.</p>
+
+  <section class="layer users">
+    <div class="head"><b>Users &amp; Access</b><span class="vm">browser · Instruqt tabs</span></div>
+    <div class="cells">
+      <div class="cell"><b>Platform admins</b><span>create departments &amp; projects</span></div>
+      <div class="cell"><b>ML engineers</b><span>deploy models</span></div>
+      <div class="cell"><b>Web UI · CLI · API</b><span>Run:ai interfaces</span></div>
+      <div class="cell hl"><b>Inference clients <span class="new">NEW</span></b><span>apps calling the models, via BNK</span></div>
+    </div>
+  </section>
+  <div class="join"><i></i></div>
+
+  <section class="layer cp">
+    <div class="head"><b>Run:ai Control Plane</b><span class="vm">VM: runai</span></div>
+    <div class="cells">
+      <div class="cell hl"><b>Organizations</b><span>departments, projects, quotas → the tenant is defined here, once</span></div>
+      <div class="cell"><b>Multi-tenancy</b><span>isolated tenants</span></div>
+      <div class="cell"><b>Policy</b><span>priorities, rules</span></div>
+      <div class="cell"><b>Workloads</b><span>submit &amp; track inference</span></div>
+      <div class="cell"><b>Monitoring</b><span>GPU usage per project</span></div>
+    </div>
+  </section>
+  <div class="join"><i></i></div>
+
+  <div class="bridge">
+    <div><b>BNK ↔ Run:ai tenancy controller <span class="new">NEW · open source</span></b><br>
+    <span>Reads every Run:ai project and writes its BNK config: front door, rate limit from GPU quota, model pool, priority, metering. Delete the project, and BNK removes it.</span></div>
+    <span class="vm">VM: control</span>
+  </div>
+  <div class="join red"><i></i></div>
+
+  <section class="layer f5">
+    <div class="head"><b>F5 BNK 2.4 · AI Factory Service Plane <span class="new" style="background:#fff;color:var(--f5)">NEW</span></b>
+      <span class="vm" style="color:#fff">VM: dpu <span style="opacity:.8">(BlueField simulated)</span></span></div>
+    <div class="cells">
+      <div class="cell"><b>Tenant front door</b><span>one VIP / hostname per Run:ai project</span></div>
+      <div class="cell"><b>Rate limit</b><span>derived from the project's GPU quota</span></div>
+      <div class="cell"><b>Endpoint Picker</b><span>sends each request to the best replica (KV cache, queue)</span></div>
+      <div class="cell"><b>Priority</b><span>sheds low-priority traffic first, like Run:ai preemption</span></div>
+      <div class="cell"><b>Metering</b><span>tokens / requests per project</span></div>
+      <div class="cell"><b>Egress</b><span>own outbound IP per project</span></div>
+    </div>
+  </section>
+  <div class="join red"><i></i></div>
+
+  <section class="layer cs">
+    <div class="head"><b>Run:ai Cluster Services</b><span class="vm">VM: gpu</span></div>
+    <div class="cells">
+      <div class="cell"><b>Run:ai Scheduler (KAI)</b><span>fair-share, preemption, GPU fractions</span></div>
+      <div class="cell"><b>Resource Management</b><span>project → namespace mapping</span></div>
+      <div class="cell"><b>Run:ai operators</b><span>reconcile projects &amp; workloads</span></div>
+      <div class="cell"><b>Kubernetes</b><span>control plane on VM: control</span></div>
+    </div>
+  </section>
+  <div class="join"><i></i></div>
+
+  <section class="layer gpu">
+    <div class="head"><b>NVIDIA GPU Infrastructure</b><span class="vm">VM: gpu</span></div>
+    <div class="cells">
+      <div class="cell"><b>GPU nodes <span class="sim">simulated</span></b><span>4 fake A10 GPUs</span></div>
+      <div class="cell"><b>Model servers <span class="sim">simulated</span></b><span>vLLM simulator, 0.5 GPU each</span></div>
+      <div class="cell"><b>Networking</b><span>Calico · DPU pcie tunnel</span></div>
+    </div>
+  </section>
+
+  <div class="flows">
+    <div class="flow a"><h3>Admin path: set up once</h3>
+      <ol><li>Admin creates project <code>prod-chat</code> (2 GPU) in the Run:ai UI</li>
+      <li>Run:ai makes the namespace and quota</li>
+      <li>The controller sees it and configures BNK</li>
+      <li>The ML engineer deploys a model, and Run:ai places it on a GPU fraction</li></ol></div>
+    <div class="flow r"><h3>Request path: every call</h3>
+      <ol><li>The app calls <code>prod-chat.ai.acme.lab</code></li>
+      <li>BNK identifies the tenant and checks its limit</li>
+      <li>The Endpoint Picker picks the best replica</li>
+      <li>The GPU does the work, and BNK counts the tokens</li></ol></div>
+  </div>
+  <div class="key"><span>Green / dark: NVIDIA Run:ai as shipped</span><span>Red: added by F5</span><span>Dashed tag: simulated in the lab</span></div>
+</div>

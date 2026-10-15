@@ -1,270 +1,172 @@
-# Feature Specification: BNK 2.4 × Open-Source Run:ai — "One Tenant, Two Planes" Lab
+# Feature Specification: BNK 2.4 × Open-Source NVIDIA Run:ai — Tenant Defined Once
 
 **Feature Branch**: `001-bnk-runai-lab`
-**Created**: 2026-10-15
+**Created**: 2026-10-15 · **Revised**: 2026-10-15 (re-anchored on Santosh's engineering brief)
 **Status**: Draft
-**Input**: User description: "New Instruqt track with real BNK 2.4 and open-source NVIDIA
-Run:ai (simulated GPUs, no real GPU hardware). BNK must shine: every BNK 2.4 capability
-fits a Run:ai moment and makes sense. Covers Santosh's GTC Berlin brief (tenancy
-controller, per-project metering) and is appealing enough to get F5 listed in the
-NVIDIA DSX ecosystem."
+**Source of truth**: "BNK + Open-Source Run:ai — Engineering Brief for Pre-Sales" (Santosh
+Erram, 2026-10-14). Where this spec and the brief differ, the brief wins. The exceptions are
+the identifier corrections in `docs/verified-names.md`, which the brief itself asked us to
+verify.
 
-## Story
+## Goal (from the brief)
 
-**Acme AI Factory** runs one shared GPU cluster. The platform team uses Run:ai to
-decide *who gets GPUs*. The learner is the platform engineer who adds BNK so the same
-tenant model decides *who gets tokens, at what priority, over which path*. A tenant is
-defined once in Run:ai and appears in BNK automatically.
+Get F5 listed as the **DSX OS service-plane component** for open-source NVIDIA Run:ai, by
+showing NVIDIA at GTC Berlin (20–22 Oct) that **BNK consumes Run:ai's tenant model and feeds
+its visibility layer**.
 
-Two tenants carry the whole story:
+The integration is **operational, not functional**. It does not change the BNK data plane:
 
-- **prod-chat**: high priority, a guaranteed GPU quota, a customer-facing chat model.
-- **research**: low priority, a fractional GPU quota, batch and experimental models.
+1. A tenant is **defined once in Run:ai** and exists in BNK (W1).
+2. **Tokens are metered per Run:ai project** (W2).
+3. Tenant traffic telemetry is shaped for **Workload Map** (W4; Grafana until the format
+   is known).
+
+**Baseline, not the integration**: BNK's Endpoint Picker already routes to Run:ai-scheduled
+inference pods through the Gateway API Inference Extension (and to Dynamo). It is shown and
+documented as "already compatible". It is not presented as what we built.
+
+**Takeaway the audience must leave with** (brief, verbatim): *a tenant is defined once, in
+Run:ai, and exists on the DPU; traffic isolation and metering happen before any GPU cycle;
+host CPUs are untouched.*
+
+## Deliverables
+
+| ID | Deliverable | Audience |
+|---|---|---|
+| D1 | GTC demo, under 8 min, recorded, following the brief's 8-step script | NVIDIA |
+| D2 | NVIDIA packet: public Apache 2.0 controller repo, Helm chart + validation matrix, 2-page architecture note, recording, EPP-with-Dynamo baseline doc | NVIDIA engineering |
+| D3 | Instruqt track: the same story hands-on, with simulated GPUs | partners, SEs, customers |
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 — Tenant defined once (Priority: P1) 🎯 MVP / GTC core
+Tenants follow the brief: **tenant-a** (2 GPU quota) and **tenant-b** (0.5 GPU quota),
+in Department `acme`.
 
-As a platform engineer, I create a Run:ai project with a GPU quota, and BNK
-automatically gets an isolated front door for that tenant with rate limits derived
-from the quota. Deleting the project removes it.
+### User Story 1 — Tenant defined once (P1) 🎯 W1 · brief steps 2, 4, 8
 
-**Why this priority**: This is Santosh's headline and the reason NVIDIA would list F5.
-It works without any other story.
+A platform admin creates a project in Run:ai. BNK gets that tenant automatically: ingress
+virtual server/hostname, namespace binding, and a rate limit derived from the project's
+GPU quota. Deleting the project in Run:ai removes the BNK tenant.
 
-**Independent Test**: Create projects `prod-chat` (quota 2 GPU) and `research`
-(quota 0.5 GPU). Within 30 seconds, each has its own BNK listener, route, and rate
-limit, labelled with the Run:ai project. Delete `research`, and its BNK objects are
-gone within 30 seconds.
-
-**Acceptance Scenarios**:
-
-1. **Given** BNK, Run:ai, and the tenancy controller are running, **When** the
-   learner creates a Run:ai project with a GPU quota, **Then** a BNK tenant (gateway
-   listener/VIP, route, rate-limit policy) exists, labelled with the project and
-   department names.
-2. **Given** a project's GPU quota is changed in Run:ai, **When** the controller
-   reconciles, **Then** the tenant's request/token rate limit changes proportionally.
-3. **Given** a project is deleted, **When** the controller reconciles, **Then** all
-   BNK objects for that tenant are removed and its endpoint stops answering.
-
----
-
-### User Story 2 — GPU fractions behind one gateway, routed by model state (Priority: P1)
-
-As a platform engineer, I deploy model servers through Run:ai (the Run:ai Scheduler places them on
-fractional simulated GPUs). BNK's InferencePool and F5 Endpoint Picker route each
-request to the best replica using live model-server state, including KV-cache prefix
-affinity.
-
-**Why this priority**: This shows BNK 2.4's flagship inference feature on exactly the
-pods Run:ai scheduled. It's the "composition" proof.
-
-**Independent Test**: Two replicas of one model run on GPU fractions of the same
-simulated GPU. A load run with repeated system prompts shows a higher prefix-cache
-hit rate and lower TTFT with the Endpoint Picker than with plain round-robin, on a
-side-by-side dashboard.
+**Independent Test**: Create tenant-a and tenant-b in the Run:ai UI. Within 30 s,
+`kubectl get` shows the BNK tenant objects, labelled with the Run:ai project and department.
+Delete tenant-b in Run:ai, and its BNK objects and endpoint are gone within 30 s.
 
 **Acceptance Scenarios**:
+1. **Given** Run:ai, BNK and the controller are running, **When** a project is created in
+   Run:ai, **Then** a BNK tenant (ingress VS/hostname, route, rate limit) exists, labelled
+   with the Run:ai project and department.
+2. **Given** a project's GPU quota changes in Run:ai, **When** the controller reconciles,
+   **Then** the tenant's rate limit changes in proportion. An explicit annotation overrides it.
+3. **Given** a project is deleted in Run:ai, **When** the controller reconciles, **Then**
+   the BNK tenant and its ingress disappear.
+4. **Given** someone deletes a BNK tenant object by hand, **When** the controller
+   reconciles, **Then** it is recreated (Run:ai stays the source of truth).
 
-1. **Given** replicas were placed by the Run:ai Scheduler with `gpu-fraction`, **When** the learner
-   inspects pods, **Then** two or more pods share one simulated GPU, scheduled via
-   the Run:ai project queue.
-2. **Given** an InferencePool selects the tenant's model pods, **When** traffic with
-   shared prefixes is sent, **Then** cache hit rate and TTFT on the dashboard beat the
-   round-robin baseline run.
-3. **Given** Run:ai scales or moves a replica, **When** traffic continues, **Then** BNK
-   tracks the new endpoint set with no client-visible errors.
+### User Story 2 — Isolation before any GPU cycle (P1) · brief steps 3, 5
 
----
+Two tenants share one GPU through Run:ai GPU fractions. When both send traffic, tenant-b
+is throttled at its quota-derived limit **at BNK**, and tenant-a is unaffected.
 
-### User Story 3 — Priority enforced end-to-end (Priority: P1)
-
-Under contention, Run:ai preempts low-priority research workloads. BNK enforces the
-same intent on the data path: prod-chat requests keep their latency SLO while research
-requests are shed or throttled first.
-
-**Why this priority**: This is the most memorable moment of the demo, with one business
-intent enforced at both the scheduler and the gateway.
-
-**Independent Test**: Start research and prod load together, then trigger overload.
-The dashboard shows research pods preempted by Run:ai and research requests shed by BNK,
-while prod-chat p95 TTFT stays within its target.
+**Independent Test**: Both inference workloads run on fractions of the same (simulated) GPU.
+A load run against both shows 429s for tenant-b at its limit, with flat latency and zero
+errors for tenant-a.
 
 **Acceptance Scenarios**:
+1. **Given** one inference workload per project at 0.5 GPU, **When** the learner inspects
+   pods, **Then** both run on the same GPU, placed by the Run:ai Scheduler.
+2. **Given** traffic above tenant-b's limit, **When** it reaches BNK, **Then** BNK rejects
+   the excess before it reaches the GPU node, and tenant-a's p95 latency is unchanged.
 
-1. **Given** both tenants are under load, **When** cluster GPU demand exceeds
-   capacity, **Then** Run:ai preempts research workloads per queue priority.
-2. **Given** model servers are saturated, **When** requests arrive, **Then** BNK
-   admits prod-chat (critical objective) and sheds or throttles research
-   (sheddable/standard objective).
-3. **Given** contention ends, **When** research capacity returns, **Then** research
-   traffic is served again without manual action.
+### User Story 3 — Tokens metered per Run:ai project (P1) 🎯 W2 · brief step 6
 
----
+BNK counts prompt and completion tokens per request, keyed to the Run:ai project at
+ingress, and exposes `bnk_tokens_total{project,department,model,direction}`. A Grafana panel
+shows it beside Run:ai's GPU allocation for the same projects.
 
-### User Story 4 — Per-project token metering (Priority: P2)
-
-As a platform owner, I see tokens (or requests, if BNK can't count tokens yet)
-consumed per Run:ai project and department, side by side with that project's GPU
-allocation.
-
-**Why this priority**: This is the chargeback story and Santosh's W2. It's valuable,
-but it depends on an open product question.
-
-**Independent Test**: After traffic, a Grafana panel shows
-`bnk_tokens_total{project,department,model,direction}` (or the request-count
-fallback) per project, next to the Run:ai project allocation for the same project.
+**Independent Test**: After a traffic run, the panel shows token counters per project,
+proportional to traffic sent, beside each project's GPU allocation.
 
 **Acceptance Scenarios**:
+1. **Given** traffic to both tenants, **When** the dashboard is opened, **Then**
+   `bnk_tokens_total` rises per project and direction.
+2. **Given** BNK 2.4 cannot count tokens at the gateway, **When** the demo runs, **Then**
+   the panel shows request counts per project, and the slide says so (brief fallback).
 
-1. **Given** traffic to both tenants, **When** the learner opens the dashboard,
-   **Then** per-project prompt and completion token counters increase in proportion to
-   traffic sent.
-2. **Given** BNK 2.4 cannot count tokens, **When** the lab runs, **Then** the panel
-   shows request counts and the lab text says so explicitly.
+### User Story 4 — Workload Map–ready telemetry (P2) · W4
 
----
+Per-project request rate, token throughput, edge TTFT and egress destinations are exported
+in one documented schema, shown in Grafana now and ready to feed NVIDIA Workload Map once
+NVIDIA shares the ingestion format.
 
-### User Story 5 — Safe model rollout (Priority: P2)
+**Independent Test**: A documented metric schema exists, and every field is populated in
+Grafana after a traffic run.
 
-Run:ai deploys v2 of a model alongside v1. BNK's InferenceModelRewrite sends a
-weighted share of traffic to v2 under the same client-facing model name, then shifts
-it to 100%.
+### User Story 5 — Installable beside Run:ai (P2) · W3
 
-**Why this priority**: This is a common operator workflow and shows a distinct BNK 2.4
-capability triggered by a Run:ai deployment.
+One Helm chart installs the controller and metering beside the open-source Run:ai chart.
+The validation matrix records the tested versions of BNK, Run:ai (including its scheduler
+and resource management) and the GPU fractioning operator.
 
-**Independent Test**: Clients call model name `chat`. Traffic splits 90/10 to v1/v2,
-then 0/100, with no client change and no errors.
+**Independent Test**: `helm install` on a cluster that already runs Run:ai, then US1
+passes. The matrix file lists the pinned versions.
 
-**Acceptance Scenarios**:
+### Baseline (shown, not built) — Run:ai-scheduled inference behind the BNK Endpoint Picker
 
-1. **Given** v1 and v2 deployed via Run:ai, **When** a 90/10 rewrite is applied,
-   **Then** observed traffic split is 90/10 ±5%.
-2. **Given** the rewrite moves to 100% v2, **When** v1 is deleted in Run:ai,
-   **Then** no client requests fail.
+The routes from US1 point at a BNK InferencePool with the F5 Endpoint Picker over the
+Run:ai inference pods. One lab step shows that this already works and links the
+EPP-with-Dynamo document. No new integration is claimed.
 
----
+### Optional Instruqt extras (beyond the brief; not in the GTC demo)
 
-### User Story 6 — Per-tenant egress identity (Priority: P3)
-
-Each Run:ai project pulls models and calls external APIs through a BNK EgressGateway
-with its own source identity, so outbound traffic is attributable per tenant.
-
-**Why this priority**: It's a security and audit story that completes the tenant
-picture. It's nice to have.
-
-**Independent Test**: A pod in each project calls a lab-local "model hub" endpoint.
-The hub's log shows a different source IP per tenant.
-
-**Acceptance Scenarios**:
-
-1. **Given** an EgressGateway per tenant namespace, **When** pods make outbound
-   calls, **Then** the destination sees the tenant-specific SNAT address.
-
----
-
-### User Story 7 — Disaggregated serving (Priority: P3, stretch)
-
-Run:ai gang-schedules prefill and decode workers as one unit. BNK routes the two phases to
-their separately scaled pools.
-
-**Why this priority**: This is advanced and depends on simulator support. If it can't
-be shown honestly, it becomes architecture-only content.
-
-**Independent Test**: Request traces show prefill served by the prefill pool and decode
-by the decode pool. Scaling decode does not disturb prefill routing.
-
----
+Shown only if time allows after D1–D3: priority-aligned shedding, v2 model rollout,
+per-project egress identity. They're clearly marked as extras.
 
 ### Edge Cases
 
-- A Run:ai project is created without a GPU quota: the tenant gets a default minimal
-  rate limit, not unlimited.
-- Two projects map to the same namespace: the controller refuses and sets a status
-  condition, with no partial BNK config.
-- The controller is restarted mid-reconcile: no duplicate or orphaned BNK objects
-  (idempotent reconciliation).
-- BNK license is missing or expired at lab start: the setup script fails fast with a
-  clear message, rather than letting the track silently degrade.
-- All replicas of a tenant are preempted: BNK returns a fast, clean error (503 with
-  reason), not a timeout.
-- The learner deletes a BNK object the controller owns: the controller recreates it
-  (drift correction is shown as a feature).
+- A project without a GPU quota gets a minimal default rate limit, never unlimited.
+- Two projects resolving to one namespace: an error condition is raised and no BNK config
+  is written.
+- A controller restart mid-reconcile leaves no duplicates or orphans.
+- BNK license missing or expired: setup fails fast with a clear message.
+- All tenant pods gone: BNK returns a fast 503, not a timeout.
 
 ## Requirements *(mandatory)*
 
-### Functional Requirements
-
-- **FR-001**: The lab MUST run real BNK 2.4 and the **full open-source NVIDIA Run:ai
-  platform** (control plane UI/API + cluster chart) on simulated GPUs. Learners create
-  projects and deploy workloads through the Run:ai UI or CLI.
-- **FR-002**: An open-source (Apache 2.0) tenancy controller MUST create, update, and
-  delete per-tenant BNK configuration from Run:ai Projects and Queues.
-- **FR-003**: Tenant rate limits MUST be derived from the Run:ai queue GPU quota, with
-  a per-project annotation override.
-- **FR-004**: Model replicas MUST be scheduled by the Run:ai Scheduler with GPU fractions and be
-  selected by a BNK InferencePool via the tenant namespace and the
-  `kai.scheduler/queue` label.
-- **FR-005**: The lab MUST demonstrate Endpoint Picker routing against a round-robin
-  baseline with measurable differences on dashboards.
-- **FR-006**: Run:ai queue priority MUST map to BNK inference objective criticality,
-  and the mapping MUST be produced by the controller.
-- **FR-007**: The lab MUST expose per-project token counters, or request counters with
-  explicit disclosure, alongside per-project GPU allocation.
-- **FR-008**: The lab MUST demonstrate model-version rollout via InferenceModelRewrite
-  triggered by a Run:ai deployment.
-- **FR-009**: Every challenge MUST have setup, check, and solve scripts, and be
-  completable via a single `labctl` CLI.
-- **FR-010**: Lab text MUST state which claims are architecture-only (DPU offload,
-  host-CPU savings, Workload Map ingestion, real GPU isolation).
-- **FR-011**: A recorded 8-minute GTC demo script MUST run against the same lab
-  environment, covering US1–US4.
-
-### Key Entities
-
-- **Tenant**: one Run:ai Project. It has a namespace, department, queue, GPU quota,
-  and priority.
-- **BNK Tenant Bundle**: the set of BNK objects derived from one tenant (listener/VIP,
-  routes, InferencePool, objectives, rate limit, egress). It is owned by the controller
-  and carries labels back to the tenant.
-- **Model Deployment**: model server replicas scheduled by the Run:ai Scheduler in a tenant namespace,
-  with GPU fractions.
-- **Usage Record**: token/request counters keyed by project, department, model, and
-  direction.
+- **FR-001**: Real BNK 2.4 and the full open-source NVIDIA Run:ai platform (control plane +
+  cluster). Learners and presenters use the Run:ai UI or CLI.
+- **FR-002**: An open-source (Apache 2.0) controller creates, updates and deletes per-project
+  BNK tenants from Run:ai projects and queues, with RBAC that is read-only on Run:ai objects.
+- **FR-003**: The per-tenant rate limit is derived from the project's Run:ai GPU quota,
+  with an annotation override.
+- **FR-004**: Token counters per project, or request counters with disclosure, labelled
+  `project`, `department`, `model`, `direction`.
+- **FR-005**: One Helm chart plus a validation matrix with pinned versions.
+- **FR-006**: The telemetry schema is documented for Workload Map.
+- **FR-007**: No change to the BNK data plane, no scheduling functions, no east-west scope.
+- **FR-008**: Claims the environment can't prove are stated as such: the DPU and host-CPU
+  claims in Instruqt are shown on BlueField-3 hardware or as a recording.
+- **FR-009**: The GTC script follows the brief's 8 steps and runs under 8 minutes.
 
 ## Success Criteria *(mandatory)*
 
-### Measurable Outcomes
-
-- **SC-001**: Create a project, and the tenant serves traffic through BNK within 30
-  seconds with no manual BNK config.
-- **SC-002**: The Endpoint Picker run shows 30% or better lower p50 TTFT, or a
-  correspondingly higher prefix-cache hit rate, than the round-robin baseline in the
-  same lab run.
-- **SC-003**: Under overload, prod-chat p95 TTFT stays within 1.5× its unloaded value
-  while research is preempted or shed.
-- **SC-004**: A learner completes the core track (US1–US4) in 60 minutes or less. The
-  full track takes 90 minutes or less.
-- **SC-005**: Lab start-to-ready (all components healthy) takes 5 minutes or less from
-  the prebaked image.
-- **SC-006**: `instruqt track test` passes, and every challenge's check script passes
-  after its solve script, 3 runs in a row.
-- **SC-007**: The GTC demo runs end to end in 8 minutes or less, recorded by 2026-10-19.
+- **SC-001**: Project created in Run:ai → BNK tenant serving in ≤30 s; project deleted →
+  BNK tenant gone in ≤30 s.
+- **SC-002**: Under load, tenant-b is throttled at its limit while tenant-a has zero errors
+  and p95 within 10% of unloaded.
+- **SC-003**: Token (or request) counters per project match the load generator's totals
+  within 2%.
+- **SC-004**: The demo runs end to end in ≤8 min, recorded by 2026-10-19.
+- **SC-005**: Helm install beside Run:ai succeeds on a clean cluster. The matrix is published.
+- **SC-006**: The Instruqt track passes `instruqt track test` and its check scripts 3× in a row.
 
 ## Assumptions
 
-- **No real GPUs** in Instruqt. GPUs come from fake-gpu-operator, which provides
-  simulated DCGM metrics. Model servers come from a vLLM-compatible simulator (e.g.
-  llm-d-inference-sim) exposing `vllm:*` metrics and KV-cache behaviour.
-- The DPU/BlueField claims in Santosh's brief are **out of scope for Instruqt**. They
-  are covered by the separate recorded GPU-cluster demo, as allowed by Principle VI.
-- BNK license (FAR key + JWT) is available and is injected as an Instruqt secret, as in
-  the Lambda POC lab.
-- The full Run:ai platform is required. If capacity is short, a dedicated `runai` VM is
-  added to the cluster (the user approved new or larger clusters).
-- The NVIDIA Workload Map ingestion format is not public. Telemetry stops at
-  Prometheus/Grafana.
-- The track is a new standalone Instruqt track, not an extension of the BNK AI Factory
-  track.
+- Instruqt uses simulated GPUs (fake-gpu-operator) and a vLLM-compatible simulator. Real
+  BlueField-3 and GPUs are only on the partner cluster (brief: vCluster or Rafay), which
+  Santosh is confirming.
+- Identifiers follow `docs/verified-names.md`, not the pre-release names in the brief:
+  - The project namespace is read from the Run:ai project status.
+  - The controller watches projects and pods, not `InferenceWorkload`.
+- BNK license and install reuse the Lambda POC setup (team secrets, bnk-deploy).
+- Workload Map ingestion needs an NVIDIA engineering contact (brief open question).

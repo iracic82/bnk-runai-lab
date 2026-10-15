@@ -10,8 +10,9 @@ description: "Task list for BNK 2.4 × Open-Source Run:ai lab"
 **Tests**: The plan requires Go unit and envtest tests for the controller, plus
 check scripts per challenge (constitution quality gates). They are included.
 
-**Organization**: Phase 0 is the spike (hard gate). Then Setup, Foundational, one phase
-per user story, and Polish/Publish.
+**Organization**: Follows Santosh's brief. Phase 0 spike (hard gate), Setup, Foundational,
+W1 (US1+US2), W2 (US3), W5 GTC demo, W3 (US5), W4 (US4), Instruqt, publish. Phases marked
+**OPTIONAL EXTRA** are beyond the brief.
 
 ## Format: `[ID] [P?] [Story] Description`
 
@@ -79,7 +80,7 @@ per user story, and Polish/Publish.
 
 ---
 
-## Phase 3: User Story 1 — Tenant defined once (P1) 🎯 MVP / GTC core
+## Phase 3: W1 · User Story 1 — Tenant defined once (P1) 🎯 MVP / GTC core
 
 **Goal**: Create a Run:ai Project, and a BNK tenant bundle appears. Change the quota,
 and the limit changes. Delete the Project, and the bundle is gone.
@@ -110,118 +111,95 @@ removes it within 30 s.
 
 ---
 
-## Phase 4: User Story 2 — GPU fractions behind one gateway (P1)
+## Phase 4: W1 · User Story 2 — Isolation before any GPU cycle (P1)
 
-**Goal**: Run:ai packs replicas on GPU fractions, and the F5 Endpoint Picker routes by
-model state with KV-prefix affinity.
+**Goal**: tenant-a and tenant-b share one GPU (Run:ai fractions). tenant-b is throttled at
+BNK at its quota-derived limit, and tenant-a is unaffected (brief steps 3, 5).
 
-**Independent Test**: quickstart V2. Two pods share one fake GPU, and the
-`prefix-heavy` EPP run beats round-robin (SC-002).
+**Independent Test**: Both pods are on one fake GPU. Under load, tenant-b gets 429s and
+tenant-a has zero errors with p95 within 10% of unloaded (SC-002).
 
-- [ ] T039 [P] [US2] Implement `labctl model deploy <tenant> <model> [--replicas N] [--fraction F] [--version v]` submitting a **Run:ai inference workload** (sim image) via the Run:ai API/CLI, in `labctl/cmd/model.sh` 🟢 pre-spike
-- [ ] T040 [US2] Add the InferencePool builder (selector `app.kubernetes.io/part-of=model-server` in the tenant namespace, `endpointPickerRef` → F5 EPP from config `eppRef`) to `controller/internal/bnk/builders.go` 🔒 BNK-gated
-- [ ] T041 [US2] Implement `labctl routing <tenant> rr|epp` to toggle the HTTPRoute backend between a plain Service (round-robin baseline) and the InferencePool, in `labctl/cmd/routing.sh` 🔒 BNK-gated
-- [ ] T042 [P] [US2] Build the Grafana dashboard rows TTFT p50/p95, KV-cache hit rate, and pods per fake GPU, in `platform/observability/dashboards/one-tenant-two-planes.json` 🟢 pre-spike (sim/KAI panels)
-- [ ] T043 [US2] Write the challenge C3 check (pods share a GPU via Run:ai; the EPP run TTFT p50 is ≥30% lower than rr, or the cache-hit rate is higher) in `instruqt/bnk-runai/03-fractions-one-door/check.sh` + `solve.sh` 🔒 BNK-gated
-
----
-
-## Phase 5: User Story 3 — Priority enforced end-to-end (P1)
-
-**Goal**: Run:ai preempts research and BNK sheds research traffic, while prod-chat keeps
-its SLO.
-
-**Independent Test**: quickstart V3. prod p95 is ≤1.5× baseline (SC-003).
-
-- [ ] T044 [US3] Add the InferenceObjective builder (Queue priority ≥ `criticalPriorityThreshold` → Critical, else Sheddable; override `tenancy.f5.com/criticality`) to `controller/internal/bnk/builders.go`, with a unit test in `controller/internal/bnk/objective_test.go` 🔒 BNK-gated
-- [ ] T045 [P] [US3] Add the `overload` profile, which saturates both tenants and submits a high-priority Run:ai training workload to trigger Run:ai preemption of research, to `loadgen/loadgen.py` and `platform/runai/preempt-workload.yaml` 🟢 pre-spike
-- [ ] T046 [P] [US3] Add dashboard panels for Run:ai preemption events/project allocation and BNK shed/429 per tenant to `platform/observability/dashboards/one-tenant-two-planes.json` 🟢 pre-spike (Run:ai half)
-- [ ] T047 [US3] Write the challenge C4 check (research pods preempted, research requests shed/throttled, prod p95 ≤1.5× unloaded) in `instruqt/bnk-runai/04-same-priority/check.sh` + `solve.sh` 🔒 BNK-gated
+- [ ] T039 [P] [US2] Implement `labctl model deploy <tenant> <model> [--fraction F]`, submitting a **Run:ai inference workload** (sim image) via the Run:ai API/CLI, in `labctl/cmd/model.sh` 🟢 pre-spike
+- [ ] T040 [US2] Add the rate-limit iRule builder (`F5BigCneIrule` + `NetPolicy` attached to the tenant listener; limit from T032) to `controller/internal/bnk/builders_ratelimit.go` 🔒 BNK-gated
+- [ ] T041 [US2] Baseline (not the integration): point the tenant HTTPRoute at an InferencePool + `F5EPP` over the Run:ai inference pods, in `controller/internal/bnk/builders_pool.go`, with a comment that cites the brief ("already compatible") 🔒 BNK-gated
+- [ ] T042 [P] [US2] Add the `two-tenants` loadgen profile (tenant-a steady, tenant-b above its limit; reports 429s and p95 per tenant) to `loadgen/loadgen.py` 🟢 pre-spike
+- [ ] T043 [P] [US2] Add dashboard row "Isolation": per-tenant req/s, 429/s, p95, plus pods per fake GPU, in `platform/observability/dashboards/tenant-defined-once.json` 🟢 pre-spike (Run:ai half)
+- [ ] T044 [US2] Write the challenge C3 check (pods share a GPU; tenant-b 429s; tenant-a zero errors, p95 within 10%) in `instruqt/bnk-runai/03-isolation/check.sh` + `solve.sh` 🔒 BNK-gated
 
 ---
 
-## Phase 6: User Story 4 — Per-project token metering (P2)
+## Phase 5: W2 · User Story 3 — Tokens metered per Run:ai project (P1) 🎯
 
-**Goal**: Tokens or requests per Run:ai project, shown next to GPU allocation.
+**Goal**: `bnk_tokens_total{project,department,model,direction}` counted at BNK, keyed to the Run:ai project at ingress, beside Run:ai GPU allocation (brief step 6).
 
-**Independent Test**: quickstart V4. `bnk_tokens_total` per project, with its `source`
+**Independent Test**: SC-003. `bnk_tokens_total` per project, with its `source`
 label visible.
 
-- [ ] T048 [US4] Implement the metering exporter per `contracts/metrics.md`: fallback path summing `vllm:prompt_tokens_total`/`vllm:generation_tokens_total` by namespace → project with `source="model-server"`, plus `bnk_requests_total` from BNK stats, in `metering/main.go` 🟢 pre-spike (model-server path) / 🔒 (BNK request stats)
-- [ ] T049 [US4] If T009(a) answered yes, add the gateway token path with `source="gateway"` to `metering/gateway.go` 🔒 BNK-gated
-- [ ] T050 [P] [US4] Add the "Who used the tokens?" row (tokens/s per project next to the Run:ai project GPU allocation, showing the `source` label) to `platform/observability/dashboards/one-tenant-two-planes.json` 🟢 pre-spike
-- [ ] T051 [US4] Write the challenge C5 assignment text, including the disclosure of the token source, and the check in `instruqt/bnk-runai/05-who-used-tokens/` 🟢 pre-spike (text) / 🔒 (check)
+- [ ] T045 [US3] Implement the gateway metering iRule (tag the request with the project at ingress; read `usage.prompt_tokens`/`completion_tokens` from the OpenAI-compatible response or stream; HSL/stats out), modelled on the Lambda lab's per-user metering iRule, in `controller/internal/bnk/irules/metering.tcl` 🔒 BNK-gated
+- [ ] T046 [US3] Implement the metering exporter turning iRule output into `bnk_tokens_total{project,department,model,direction}` and `bnk_requests_total` (request-count fallback if T009(a) fails, with `source` label and disclosure), in `metering/main.go` 🔒 BNK-gated
+- [ ] T047 [P] [US3] Add the "Who used the tokens?" row (tokens/s per project next to the Run:ai project GPU allocation, showing the `source` label) to `platform/observability/dashboards/one-tenant-two-planes.json` 🟢 pre-spike
+- [ ] T048 [US3] Write the challenge C5 assignment text, including the disclosure of the token source, and the check in `instruqt/bnk-runai/05-who-used-tokens/` 🟢 pre-spike (text) / 🔒 (check)
 
 **Checkpoint**: US1–US4 complete, which is the full GTC script.
 
 ---
 
-## Phase 7: GTC Demo Deliverable (by 2026-10-19)
+## Phase 6: W5 · GTC Demo Deliverable (by 2026-10-19)
 
-- [ ] T052 Write the 8-minute script mapping Santosh's 8 steps to `labctl` commands, with the DPU step marked architecture-only, in `demo/gtc/script.md`
-- [ ] T053 [P] Write the request-path architecture note (two pages, solid/dashed arrows) in `demo/gtc/architecture.md`
-- [ ] T054 Rehearse 3× on the spike VM, record the run, and log timings in `demo/gtc/rehearsal-log.md` (SC-007)
-
----
-
-## Phase 8: User Story 5 — Safe model rollout (P2)
-
-**Independent Test**: quickstart V5. The split is within ±5% and there are zero client errors.
-
-- [ ] T055 [P] [US5] Add the `rollout` loadgen profile with per-version response tagging to `loadgen/loadgen.py` 🟢 pre-spike
-- [ ] T056 [US5] Write the learner-applied InferenceModelRewrite manifests (90/10 and 0/100) in `instruqt/bnk-runai/06-ship-v2/manifests/` 🔒 BNK-gated
-- [ ] T057 [US5] Write the challenge C6 check (split ±5%, zero non-2xx) in `instruqt/bnk-runai/06-ship-v2/check.sh` + `solve.sh` 🔒 BNK-gated
-
-## Phase 9: User Story 6 — Per-tenant egress identity (P3)
-
-- [ ] T058 [P] [US6] Deploy a lab-local "model hub" echo server logging source IP in `platform/models/model-hub.yaml` 🟢 pre-spike
-- [ ] T059 [US6] Add the EgressGateway builder (NamespaceSelector = tenant ns, SNAT from `egress.snatPoolCidr`) to `controller/internal/bnk/builders.go` 🔒 BNK-gated
-- [ ] T060 [US6] Write the challenge C7 check (distinct source IP per tenant in hub logs) in `instruqt/bnk-runai/07-own-exit/check.sh` + `solve.sh` 🔒 BNK-gated
-
-## Phase 10: User Story 7 — Disaggregated serving (P3, stretch)
-
-- [ ] T061 [US7] Adapt the sim's `manifests/disaggregation` into prefill/decode Deployments gang-scheduled by the Run:ai Scheduler (PodGroup) in `platform/models/pd/` 🟢 pre-spike
-- [ ] T062 [US7] Configure P/D-aware routing and write the C8 check in `instruqt/bnk-runai/08-disaggregated/` 🔒 BNK-gated (drop to architecture-only if T009(b) fails)
+- [ ] T049 Write the 8-minute script following the brief's 8 steps exactly (Run:ai UI for steps 2–3 and 8; `kubectl get` BNK CRs for step 4; Grafana for steps 5–6; BlueField-3 recording for step 7; request-count fallback slide), in `demo/gtc/script.md`
+- [ ] T050 [P] Write the request-path architecture note (two pages, solid/dashed arrows) in `demo/gtc/architecture.md`
+- [ ] T051 Rehearse 3× on the spike VM, record the run, and log timings in `demo/gtc/rehearsal-log.md` (SC-007)
 
 ---
 
-## Phase 11: Instruqt Track (after GTC)
+## Phase 7: W3 · User Story 5 — Installable beside Run:ai (P2)
 
-- [ ] T063 Measure track start time. If it's over 15 min, add Run:ai/fake-gpu/sim images to a pre-pull step in `instruqt/bnk-runai/track_scripts/setup-bnk` (the `f5/bnk-f5` image stays as is; a new image only if needed)
-- [ ] T064 [P] Finalize `instruqt/bnk-runai/track.yml` (new track, quoted teaser ≤255 chars, secrets `BNK_FAR_KEY`/`BNK_JWT`, tabs: terminal, Grafana, Run:ai UI if R5 allows) and `instruqt/config.yml` (custom image VM)
-- [ ] T065 [P] Write challenge C1 "Meet the AI Factory" (assignment, setup, check, solve) in `instruqt/bnk-runai/01-meet-the-factory/`
-- [ ] T066 Write the track setup script that starts the cluster, applies the license, and waits for `labctl status` green in ≤5 min, in `instruqt/bnk-runai/track_scripts/setup-bnk` (SC-005, target: same as the bnk-ai-kv-lab track)
-- [ ] T067 Write the debrief challenge with the architecture slide and honest-claims callouts (DPU, host CPU, Workload Map, GPU isolation) in `instruqt/bnk-runai/09-debrief/`
-- [ ] T068 Run all challenge solve+check scripts 3× in a row and `instruqt track test`, logging in `docs/validation/track-test.md` (SC-006)
-- [ ] T069 Do a full browser walkthrough of the Instruqt track (terminal attach time, Grafana layout, timing), logging findings in `docs/validation/walkthrough.md`
+- [ ] T052 [P] [US5] Create the Helm chart (controller + metering + dashboards + RBAC read-only on Run:ai objects; values per `contracts/tenancy-controller.md`) in `charts/bnk-runai-tenancy/`
+- [ ] T053 [US5] Prove `helm install` on a cluster already running the open-source Run:ai chart, then pass US1, and log it in `docs/validation/helm-install.md`
+- [ ] T054 [P] [US5] Write the validation matrix (BNK, Run:ai control plane + cluster chart incl. scheduler/resource management, GPU fractioning operator, K8s, CNI) with pinned versions, in `docs/validation-matrix.md`
+
+## Phase 8: W4 · User Story 4 — Workload Map–ready telemetry (P2)
+
+- [ ] T055 [US4] Document the per-project telemetry schema (request rate, token throughput, edge TTFT, egress destinations; labels project/department/model) in `docs/workload-map-schema.md`, flagging that the ingestion format awaits an NVIDIA contact
+- [ ] T056 [US4] Populate every schema field in Grafana (edge TTFT from BNK stats or the iRule; egress destinations from BNK egress logs), in `platform/observability/dashboards/tenant-defined-once.json` 🔒 BNK-gated
+
+## Phase 9: OPTIONAL EXTRAS (beyond the brief; Instruqt only, after D1–D3)
+
+- [ ] T057 [P] Priority-aligned shedding: InferenceObjective from Run:ai priority + Run:ai preemption scenario, in `instruqt/bnk-runai/extras/priority/` 🔒 BNK-gated
+- [ ] T058 [P] v2 rollout via InferenceModelRewrite, in `instruqt/bnk-runai/extras/rollout/` 🔒 BNK-gated
+- [ ] T059 [P] Egress identity per project (`F5SPKEgress` + Snatpool), in `instruqt/bnk-runai/extras/egress/` 🔒 BNK-gated
+
+## Phase 10: Instruqt Track (after GTC)
+
+- [ ] T060 Measure track start time. If it's over 15 min, add Run:ai/fake-gpu/sim images to a pre-pull step in `instruqt/bnk-runai/track_scripts/setup-bnk` (the `f5/bnk-f5` image stays as is; a new image only if needed)
+- [ ] T061 [P] Finalize `instruqt/bnk-runai/track.yml` (new track, quoted teaser ≤255 chars, secrets `BNK_FAR_KEY`/`BNK_JWT`, tabs: terminal, Grafana, Run:ai UI if R5 allows) and `instruqt/config.yml` (custom image VM)
+- [ ] T062 [P] Write challenge C1 "Meet the AI factory" (Run:ai UI, GPU nodes; assignment, setup, check, solve) in `instruqt/bnk-runai/01-meet-the-factory/`
+- [ ] T063 Write the track setup script that starts the cluster, applies the license, and waits for `labctl status` green in ≤5 min, in `instruqt/bnk-runai/track_scripts/setup-bnk` (SC-005, target: same as the bnk-ai-kv-lab track)
+- [ ] T064 Write the debrief challenge with the brief's request-path diagram, the BlueField-3 recording (host CPU flat, DPU ingress), and callouts for what is simulated in `instruqt/bnk-runai/09-debrief/`
+- [ ] T065 Run all challenge solve+check scripts 3× in a row and `instruqt track test`, logging in `docs/validation/track-test.md` (SC-006)
+- [ ] T066 Do a full browser walkthrough of the Instruqt track (terminal attach time, Grafana layout, timing), logging findings in `docs/validation/walkthrough.md`
 
 ---
 
-## Phase 12: Polish, Packaging & Publish
+## Phase 11: Publish — the NVIDIA packet (brief)
 
-- [ ] T070 [P] Create the Helm chart (controller + metering + dashboards + RBAC, values per `contracts/tenancy-controller.md`) in `charts/bnk-runai-tenancy/`
-- [ ] T071 [P] Write the validation matrix with pinned versions (BNK, Run:ai images, fake-gpu, sim, K8s) in `docs/validation-matrix.md` (brief W3)
-- [ ] T072 Write the public README (what it does, Run:ai objects watched, BNK objects produced, quickstart, honest limits) and `CONTRIBUTING.md`/`NOTICE` in the repo root
-- [ ] T073 **Publish the controller as a public Apache 2.0 repo** (e.g. `f5devcentral/bnk-runai-tenancy`): get F5 open-source approval, run the secret scan (T015) on full history, and push the controller, metering, chart, and docs (lab-only content optional)
-- [ ] T074 **Docs PR to `dsx-ai-factory/run-ai`**: add F5 BNK 2.4 as a conformant Gateway API controller example to `docs/multi-tenant/installation-and-configuration/configuration/networking/kubernetes-gateway-api.md` (install, GatewayClass, routing of control plane + inference hosts), with DCO sign-off (`git commit -s`), following their CONTRIBUTING (open an issue first)
-- [ ] T075 **Issue/Discussion on `dsx-ai-factory/run-ai`** proposing a "gateway / service-plane integration" pattern (tenant = Run:ai Project → gateway tenant, queue priority → inference objective, per-project metering), linking the public repo (T073) and the docs PR (T074)
-- [ ] T076 [P] Brain sync: store the verified names and spike outcomes via `add_memory` (project RunAI) and file a wiki note `~/brain/wiki/` on the BNK+Run:ai integration, then run `bash ~/brain/tools/sync.sh "bnk-runai lab"`
+- [ ] T067 Write the public README (what it does, Run:ai objects watched, BNK objects produced, quickstart, honest limits) and `CONTRIBUTING.md`/`NOTICE` in the repo root
+- [ ] T068 **Publish the controller as a public Apache 2.0 repo** (e.g. `f5devcentral/bnk-runai-tenancy`): get F5 open-source approval, run the secret scan (T015) on full history, and push the controller, metering, chart, and docs (lab-only content optional)
+- [ ] T069 **Docs PR to `dsx-ai-factory/run-ai`**: add F5 BNK 2.4 as a conformant Gateway API controller example to `docs/multi-tenant/installation-and-configuration/configuration/networking/kubernetes-gateway-api.md` (install, GatewayClass, routing of control plane + inference hosts), with DCO sign-off (`git commit -s`), following their CONTRIBUTING (open an issue first)
+- [ ] T070 **Issue/Discussion on `dsx-ai-factory/run-ai`** proposing a "gateway / service-plane integration" pattern (tenant = Run:ai Project → gateway tenant, queue priority → inference objective, per-project metering), linking the public repo (T073) and the docs PR (T074)
+- [ ] T071 [P] Write the 2-page architecture note from the brief's request-path diagram and add the EPP-with-Dynamo baseline doc link, in `docs/architecture-note.md`
+- [ ] T072 [P] Brain sync: store the verified names and spike outcomes via `add_memory` (project RunAI) and file a wiki note `~/brain/wiki/` on the BNK+Run:ai integration, then run `bash ~/brain/tools/sync.sh "bnk-runai lab"`
 
 ---
 
 ## Dependencies & Execution Order
 
 ```
-Phase 0 (spike) ──gate T011──▶ all 🔒 tasks
-Phase 1 Setup ──▶ Phase 2 Foundational ──▶ US1 ──▶ US2 ──▶ US3 ──▶ US4 ──▶ GTC (Phase 7)
-                                            └──────────▶ US5, US6, US7 (independent after US1)
-GTC ──▶ Phase 11 Instruqt ──▶ Phase 12 Publish (T073 → T074 → T075)
+Phase 0 spike ──gate──▶ all 🔒 tasks
+Setup ─▶ Foundational ─▶ W1 (US1 → US2) ─▶ W2 (US3) ─▶ W5 GTC demo (by Oct 19)
+                                    └──▶ W3 (US5), W4 (US4) ─▶ Instruqt ─▶ Publish packet
+Optional extras: only after the GTC demo and the packet are done.
 ```
-
-- Phases 1–2 🟢 tasks run **in parallel with the spike**.
-- US2–US7 each depend on US1 (bundle + applier) but not on each other, except that US4's
-  dashboard row reuses the US2 dashboard file.
-- T074/T075 depend on T073 (the public repo link) and a working BNK Gateway config (T034).
 
 ## Parallel Opportunities
 
