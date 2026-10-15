@@ -1,0 +1,124 @@
+# bnk-tenancy-mcp: a stateless MCP server (Streamable HTTP, JSON responses, no Mcp-Session-Id) with three
+# read-only tools: get_tenant_front_door, get_tenant_usage, list_tenants. An agent that creates a Run:ai
+# project through NVIDIA's runai-mcp-server polls get_tenant_front_door here until BNK serves the tenant.
+# Design and client setup: docs/mcp.md.
+#
+# Clients authenticate with a static bearer token, compared in constant time. Create it once:
+#   kubectl -n bnk-runai-tenancy create secret generic bnk-tenancy-mcp-token \
+#     --from-literal=token="$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 40)"
+# Read it back for an MCP client:
+#   kubectl -n bnk-runai-tenancy get secret bnk-tenancy-mcp-token -o jsonpath='{.data.token}' | base64 -d
+# The pod reads the token once at start; restart the Deployment after rotating it.
+#
+# RBAC is read-only and namespaced: get/list Gateways and get iRules in f5-bnk, get the one ledger
+# ConfigMap in bnk-runai-tenancy. No Secrets, no Run:ai objects, no writes anywhere.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bnk-tenancy-mcp
+  namespace: bnk-runai-tenancy
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bnk-tenancy-mcp
+  namespace: f5-bnk
+rules:
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways"]
+    verbs: ["get", "list"]
+  - apiGroups: ["k8s.f5net.com"]
+    resources: ["f5-big-cne-irules"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bnk-tenancy-mcp
+  namespace: f5-bnk
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bnk-tenancy-mcp
+subjects:
+  - kind: ServiceAccount
+    name: bnk-tenancy-mcp
+    namespace: bnk-runai-tenancy
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bnk-tenancy-mcp-ledger
+  namespace: bnk-runai-tenancy
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["bnk-runai-usage"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bnk-tenancy-mcp-ledger
+  namespace: bnk-runai-tenancy
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bnk-tenancy-mcp-ledger
+subjects:
+  - kind: ServiceAccount
+    name: bnk-tenancy-mcp
+    namespace: bnk-runai-tenancy
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bnk-tenancy-mcp
+  namespace: bnk-runai-tenancy
+  labels: {app.kubernetes.io/name: bnk-tenancy-mcp}
+spec:
+  # Stateless: no sessions, no cache. Scale freely; any replica answers any request.
+  replicas: 2
+  selector:
+    matchLabels: {app.kubernetes.io/name: bnk-tenancy-mcp}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: bnk-tenancy-mcp}
+    spec:
+      serviceAccountName: bnk-tenancy-mcp
+      nodeSelector: {app: runai-control-plane}
+      # fsGroup makes the 0440 token file readable by the nonroot user.
+      securityContext: {runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, fsGroup: 65532, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: mcp
+          image: docker.io/iracic82/bnk-tenancy-mcp:0.1.0
+          args:
+            - --listen=:8090
+            - --token-file=/var/run/bnk-tenancy-mcp/token
+            - --bnk-namespace=f5-bnk
+            - --ledger-namespace=bnk-runai-tenancy
+          ports:
+            - {name: mcp, containerPort: 8090, protocol: TCP}
+          livenessProbe: {httpGet: {path: /healthz, port: mcp}, periodSeconds: 20}
+          readinessProbe: {httpGet: {path: /healthz, port: mcp}, periodSeconds: 5}
+          volumeMounts:
+            - {name: token, mountPath: /var/run/bnk-tenancy-mcp, readOnly: true}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, readOnlyRootFilesystem: true}
+      volumes:
+        - name: token
+          secret: {secretName: bnk-tenancy-mcp-token, defaultMode: 0440, items: [{key: token, path: token}]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bnk-tenancy-mcp
+  namespace: bnk-runai-tenancy
+  labels: {app.kubernetes.io/name: bnk-tenancy-mcp}
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/name: bnk-tenancy-mcp}
+  ports: [{name: mcp, port: 8090, targetPort: mcp, protocol: TCP}]
