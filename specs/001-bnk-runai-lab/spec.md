@@ -33,9 +33,9 @@ host CPUs are untouched.*
 
 | ID | Deliverable | Audience |
 |---|---|---|
-| D1 | GTC demo, under 8 min, recorded, following the brief's 8-step script | NVIDIA |
+| D1 | GTC demo, ~12 min (max 15), recorded, the brief's 8 steps in order plus additions A/B/D (and C as stretch) | NVIDIA |
 | D2 | NVIDIA packet: public Apache 2.0 controller repo, Helm chart + validation matrix, 2-page architecture note, recording, EPP-with-Dynamo baseline doc | NVIDIA engineering |
-| D3 | Instruqt track: the same story hands-on, with simulated GPUs | partners, SEs, customers |
+| D3 | Instruqt track **without a DPU** (real BNK 2.4 + full Run:ai, simulated GPUs): the primary package of the integration and the GTC demo environment | NVIDIA, partners, SEs |
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -117,6 +117,24 @@ The routes from US1 point at a BNK InferencePool with the F5 Endpoint Picker ove
 Run:ai inference pods. One lab step shows that this already works and links the
 EPP-with-Dynamo document. No new integration is claimed.
 
+### User Story 6 — Usage fed back to Run:ai (P1) · addition A+B (agreed 2026-10-15)
+
+BNK's per-project usage (tokens, requests, throttled count) is written back onto the Run:ai
+project, so it is visible in Run:ai, and is rolled up per department.
+
+**Independent Test**: After traffic, the Run:ai project shows BNK usage values that match
+`bnk_tokens_total` within 2%, and the department total equals the sum of its projects.
+
+### User Story 7 — One GPU, two tenants (P2) · addition D
+
+A tokens-per-GPU panel shows two tenants sharing one GPU through Run:ai fractions, kept apart
+by BNK.
+
+### User Story 8 — Ask Run:ai (P3, stretch) · addition C
+
+The open-source Run:ai MCP server answers "which project used the most tokens?" using the
+written-back usage.
+
 ### Optional Instruqt extras (beyond the brief; not in the GTC demo)
 
 Shown only if time allows after D1–D3: priority-aligned shedding, v2 model rollout,
@@ -146,7 +164,9 @@ per-project egress identity. They're clearly marked as extras.
 - **FR-007**: No change to the BNK data plane, no scheduling functions, no east-west scope.
 - **FR-008**: Claims the environment can't prove are stated as such: the DPU and host-CPU
   claims in Instruqt are shown on BlueField-3 hardware or as a recording.
-- **FR-009**: The GTC script follows the brief's 8 steps and runs under 8 minutes.
+- **FR-009**: The GTC script follows the brief's 8 steps in order, adds A/B/D next to steps 6, and runs ~12 min (max 15).
+- **FR-010**: The controller writes per-project usage back to Run:ai (annotations/status it is allowed to write; mechanism verified in the spike) and rolls it up per department.
+- **FR-011**: Lab and slides frame the rate limit as "each tenant keeps its share of a shared GPU".
 
 ## Success Criteria *(mandatory)*
 
@@ -156,15 +176,16 @@ per-project egress identity. They're clearly marked as extras.
   and p95 within 10% of unloaded.
 - **SC-003**: Token (or request) counters per project match the load generator's totals
   within 2%.
-- **SC-004**: The demo runs end to end in ≤8 min, recorded by 2026-10-19.
+- **SC-004**: The demo runs end to end in ≤15 min (target 12), recorded by 2026-10-19.
 - **SC-005**: Helm install beside Run:ai succeeds on a clean cluster. The matrix is published.
 - **SC-006**: The Instruqt track passes `instruqt track test` and its check scripts 3× in a row.
 
 ## Assumptions
 
-- Instruqt uses simulated GPUs (fake-gpu-operator) and a vLLM-compatible simulator. Real
-  BlueField-3 and GPUs are only on the partner cluster (brief: vCluster or Rafay), which
-  Santosh is confirming.
+- **No DPU needed for the integration** (decision 2026-10-15, sent to Santosh): Instruqt uses
+  simulated GPUs and no real DPU. The DPU offload claim (brief step 7) is the architecture
+  slide plus Tolly figures, or a BlueField-3 clip if hardware appears. The partner cluster
+  is off the critical path.
 - Identifiers follow `docs/verified-names.md`, not the pre-release names in the brief:
   - The project namespace is read from the Run:ai project status.
   - The controller watches projects and pods, not `InferenceWorkload`.
