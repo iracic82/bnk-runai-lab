@@ -127,7 +127,14 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	for ns, names := range NamespaceConflicts(all.Items) {
 		if ns == spec.Namespace {
-			msg := fmt.Sprintf("namespace %s is claimed by projects %s; no BNK config written", ns, strings.Join(names, ", "))
+			// Fail closed: a tenant that was already serving must lose its BNK config, or
+			// pods of the other project in the same namespace would receive its traffic.
+			// The finalizer stays, so a later delete still goes through the BNK cleanup.
+			if err := r.Applier.Delete(ctx, p.Name); err != nil {
+				r.event(&p, corev1.EventTypeWarning, "BNKDeleteFailed", err.Error())
+				return ctrl.Result{}, err
+			}
+			msg := fmt.Sprintf("namespace %s is claimed by projects %s; BNK config removed", ns, strings.Join(names, ", "))
 			r.setState(p.Name, StateError)
 			r.event(&p, corev1.EventTypeWarning, "NamespaceConflict", msg)
 			return ctrl.Result{}, nil

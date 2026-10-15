@@ -163,6 +163,34 @@ func TestNamespaceConflictWritesNothing(t *testing.T) {
 	}
 }
 
+// A tenant already serving must lose its BNK config the moment another project claims its
+// namespace, or the newcomer's pods would receive the first tenant's traffic.
+func TestConflictRemovesExistingTenant(t *testing.T) {
+	r, a, g := setup(t, readyProject("tenant-a", "runai-shared", 2, 150))
+	reconcileOnce(t, r, "tenant-a")
+	if _, ok := a.applied["tenant-a"]; !ok {
+		t.Fatal("tenant-a should be serving before the conflict")
+	}
+
+	if err := r.Create(context.Background(), readyProject("intruder", "runai-shared", 1, 50)); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, "tenant-a")
+	reconcileOnce(t, r, "intruder")
+
+	if len(a.applied) != 0 {
+		t.Errorf("no project in a conflict may keep BNK config, got %v", a.applied)
+	}
+	if g["tenant-a"] != StateError || g["intruder"] != StateError {
+		t.Errorf("states = %v", g)
+	}
+	var p kaiv1alpha1.Project
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "tenant-a"}, &p)
+	if !controllerutil.ContainsFinalizer(&p, Finalizer) {
+		t.Error("finalizer must stay so a later delete still runs the BNK cleanup")
+	}
+}
+
 func TestBadAnnotationIsAnErrorNotACrash(t *testing.T) {
 	p := readyProject("tenant-a", "runai-tenant-a", 2, 150)
 	p.Annotations = map[string]string{"tenancy.f5.com/rps": "fast"}
