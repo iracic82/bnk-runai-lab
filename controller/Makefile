@@ -1,6 +1,6 @@
 ENVTEST_K8S ?= 1.30.x
-IMG ?= docker.io/iracic82/bnk-runai-tenancy:0.1.6
-IMG_METER ?= docker.io/iracic82/bnk-runai-meter:0.1.1
+IMG ?= docker.io/iracic82/bnk-runai-tenancy:0.1.7
+IMG_METER ?= docker.io/iracic82/bnk-runai-meter:0.1.2
 GOBIN := $(shell go env GOPATH)/bin
 
 .PHONY: build test envtest vet image push meter-image meter-push

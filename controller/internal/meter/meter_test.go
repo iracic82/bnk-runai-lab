@@ -370,3 +370,14 @@ func TestServerDropsDisallowedPeer(t *testing.T) {
 		t.Errorf("usage from a disallowed peer was counted: %v", p)
 	}
 }
+
+func TestNoModelRecordCreatesNoTokenSeries(t *testing.T) {
+	m := newMetrics(t)
+	m.Observe(Record{Project: "tenant-b", Department: "default", Code: 429, Count: 7})
+	if n := testutil.CollectAndCount(m.Tokens); n != 0 {
+		t.Errorf("a 429 without a model created %d token series", n)
+	}
+	if v := testutil.ToFloat64(m.Requests.WithLabelValues("tenant-b", "default", NoModel, "429")); v != 7 {
+		t.Errorf("429s counted = %v, want 7", v)
+	}
+}

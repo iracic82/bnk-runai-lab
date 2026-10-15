@@ -3,7 +3,9 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	kaiv1alpha1 "github.com/kai-scheduler/kai-resource-management-api/kai/v1alpha1"
@@ -52,6 +54,11 @@ type ProjectReconciler struct {
 	State    StateGauge
 	// Requeue is how soon a not-yet-ready project is looked at again.
 	Requeue time.Duration
+
+	// served remembers what each project was last served with, so BNKTenantReady is posted once per
+	// change instead of on every resync.
+	mu     sync.Mutex
+	served map[string]Desired
 }
 
 // StateGauge exposes bnk_tenant_state{project,state}. A nil gauge is fine.
@@ -134,8 +141,10 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 	r.setState(p.Name, StateServing)
-	r.event(&p, corev1.EventTypeNormal, "BNKTenantReady",
-		fmt.Sprintf("BNK tenant serving namespace %s at %.1f req/s (%s)", spec.Namespace, d.RateLimit, d.Criticality))
+	if r.changed(p.Name, d) {
+		r.event(&p, corev1.EventTypeNormal, "BNKTenantReady",
+			fmt.Sprintf("BNK tenant serving namespace %s at %.1f req/s (%s)", spec.Namespace, d.RateLimit, d.Criticality))
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -151,6 +160,9 @@ func (r *ProjectReconciler) remove(ctx context.Context, project string) error {
 		return err
 	}
 	r.setState(project, "")
+	r.mu.Lock()
+	delete(r.served, project)
+	r.mu.Unlock()
 	log.FromContext(ctx).Info("BNK tenant removed", "project", project)
 	return nil
 }
@@ -183,6 +195,20 @@ func (r *ProjectReconciler) requeue() time.Duration {
 		return r.Requeue
 	}
 	return 5 * time.Second
+}
+
+// changed records d as what project is served with and reports whether it differs from last time.
+func (r *ProjectReconciler) changed(project string, d Desired) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.served == nil {
+		r.served = map[string]Desired{}
+	}
+	if prev, ok := r.served[project]; ok && reflect.DeepEqual(prev, d) {
+		return false
+	}
+	r.served[project] = d
+	return true
 }
 
 func (r *ProjectReconciler) setState(project, state string) {

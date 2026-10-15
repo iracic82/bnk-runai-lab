@@ -1,37 +1,9 @@
 # Scrape targets and recording rules for the "One Tenant, Two Planes" dashboard.
 # Prometheus (values.yaml) selects every ServiceMonitor/PodMonitor/PrometheusRule in the cluster.
 ---
-# BNK <-> Run:ai tenancy controller: bnk_tenant_state, bnk_tenant_reconcile_seconds (controller/config/deploy.yaml).
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: bnk-runai-tenancy
-  namespace: bnk-runai-tenancy
-  labels: {app.kubernetes.io/part-of: bnk-runai-lab}
-spec:
-  selector:
-    matchLabels: {app.kubernetes.io/name: bnk-runai-tenancy}
-  endpoints:
-    - {port: metrics, path: /metrics, interval: 5s}
----
-# BNK token/request meter: bnk_requests_total, bnk_tokens_total (contracts/metrics.md). A PodMonitor, so
-# it works whether or not the meter ships a Service.
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
-metadata:
-  name: bnk-runai-meter
-  namespace: bnk-runai-tenancy
-  labels: {app.kubernetes.io/part-of: bnk-runai-lab}
-spec:
-  selector:
-    matchLabels: {app.kubernetes.io/name: bnk-runai-meter}
-  podMetricsEndpoints:
-    - portNumber: 9100
-      path: /metrics
-      interval: 5s
-      # the meter's own project/department/model labels win over target labels
-      honorLabels: true
----
+# The tenancy controller and the meter are scraped by monitors from the Helm chart
+# (charts/bnk-runai-tenancy, monitoring.enabled=true).
+
 # Model servers (vllm-twin sims) in every Run:ai project namespace, deployed by `labctl model deploy`.
 # Each series gets project = the pod's tenancy.f5.com/project label, else the runai-<project> namespace.
 apiVersion: monitoring.coreos.com/v1

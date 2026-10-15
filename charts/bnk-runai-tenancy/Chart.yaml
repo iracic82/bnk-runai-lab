@@ -6,7 +6,7 @@ description: >-
   NetPolicy; the optional meter collects per-project token usage from the BNK front door.
 type: application
 version: 0.1.0
-appVersion: "0.1.6"
+appVersion: "0.1.7"
 keywords:
   - run:ai
   - bnk

@@ -108,7 +108,7 @@ spec:
       securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: manager
-          image: docker.io/iracic82/bnk-runai-tenancy:0.1.6
+          image: docker.io/iracic82/bnk-runai-tenancy:0.1.7
           imagePullPolicy: Always
           # Token metering: the iRules send usage from TMM to the meter on the control node, which sits on
           # TMM's external network as 10.1.10.11 (platform/cluster/setup-cluster.sh). Remove both metering

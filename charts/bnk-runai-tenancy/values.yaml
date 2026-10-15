@@ -7,9 +7,9 @@
 controller:
   image:
     repository: docker.io/iracic82/bnk-runai-tenancy
-    tag: "0.1.6"
-    # Pinned build of 0.1.6; when set, the image is pulled by digest and the tag is informational.
-    digest: "sha256:c7801112f1c1e40405f16482b41072469e61688f368d7c2975cc1271b92e033a"
+    tag: "0.1.7"
+    # Pinned build of 0.1.7; when set, the image is pulled by digest and the tag is informational.
+    digest: "sha256:ccec888eb6c590b397a395ef914af8241e41d7c56c3b98790122d56331056150"
     pullPolicy: IfNotPresent
   # One active controller; extra replicas wait on the leader-election Lease.
   replicaCount: 1
@@ -79,8 +79,8 @@ metering:
 meter:
   image:
     repository: docker.io/iracic82/bnk-runai-meter
-    tag: "0.1.1"
-    digest: "sha256:65deb1e7f84f6692a76b48ca6a4c03f21d8752f003b7abe9cb8c131dc20bc82e"
+    tag: "0.1.2"
+    digest: "sha256:7e1b6c54b0bf7aaea027d9a7579615bbaaf0a5e97ed82556171ae9912b8d0dab"
     pullPolicy: IfNotPresent
   # --listen port (also the hostPort TMM connects to).
   usagePort: 5514

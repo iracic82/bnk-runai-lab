@@ -74,8 +74,12 @@ func (m *Metrics) Observe(r Record) {
 	if dept != "" {
 		dept = m.depts.label(dept)
 	}
-	m.Tokens.WithLabelValues(project, dept, model, "prompt").Add(float64(r.Prompt))
-	m.Tokens.WithLabelValues(project, dept, model, "completion").Add(float64(r.Completion))
+	// Answers without a model (429s, /v1/models, health checks) carry no tokens: count the request
+	// but create no zero-valued token series for them.
+	if model != NoModel || r.Prompt > 0 || r.Completion > 0 {
+		m.Tokens.WithLabelValues(project, dept, model, "prompt").Add(float64(r.Prompt))
+		m.Tokens.WithLabelValues(project, dept, model, "completion").Add(float64(r.Completion))
+	}
 	m.Requests.WithLabelValues(project, dept, model, strconv.Itoa(r.Code)).Add(float64(r.Count))
 	// Write-back keys are real project names; "other" is never a Run:ai project.
 	if r.Total > 0 && project != Other {

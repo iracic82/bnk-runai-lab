@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"k8s.io/client-go/tools/record"
 	"sync"
 	"testing"
 
@@ -244,5 +245,27 @@ func TestReconcileIsIdempotent(t *testing.T) {
 	}
 	if len(a.applied) != 1 || len(a.deleted) != 0 {
 		t.Errorf("applied=%v deleted=%v", a.applied, a.deleted)
+	}
+}
+
+func TestReadyEventOnlyOnChange(t *testing.T) {
+	r, _, _ := setup(t, readyProject("tenant-a", "runai-tenant-a", 2, 150))
+	rec := record.NewFakeRecorder(16)
+	r.Recorder = rec
+	for i := 0; i < 3; i++ {
+		reconcileOnce(t, r, "tenant-a")
+	}
+	if n := len(rec.Events); n != 1 {
+		t.Fatalf("3 identical reconciles posted %d events, want 1", n)
+	}
+	var p kaiv1alpha1.Project
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "tenant-a"}, &p)
+	p.Spec.Queues[0].Resources.GPU.Deserved = 1
+	if err := r.Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, "tenant-a")
+	if n := len(rec.Events); n != 2 {
+		t.Errorf("a quota change should post one more event, got %d total", n)
 	}
 }
