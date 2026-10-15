@@ -147,18 +147,22 @@ def metering() -> str:
 
 def recap() -> str:
     left = '<div class="col" style="width:640px">' + box(
-        "nv", "Run:ai &middot; owns the GPU", "Projects, departments, quotas, priority, GPU fractions, scheduling",
-        "node: runai + gpu") + box(
+        "bl", "AI agent &middot; any LLM, over MCP", "Asks for a tenant in plain English. NVIDIA's Run:ai MCP "
+        "server creates the project, <b>bnk-tenancy-mcp</b> reports its front door. A human approves every change",
+        "LLM: Nemotron") + box(
+        "nv", "Run:ai &middot; owns the GPU", "Projects, departments, quotas, priority, GPU fractions, scheduling. "
+        "NVIDIA Dynamo runs as one more project", "node: runai + gpu") + box(
         "am", "Tenancy controller + token meter &middot; open source", "Project &rarr; Gateway, route, pool, picker, "
         "rate limit, priority. Tokens &rarr; Prometheus and back onto the Project", "node: control") + box(
-        "f5", "BNK 2.4 &middot; owns the request", "Front door per tenant, 429 before the GPU, Endpoint Picker, "
-        "token metering at the edge", "node: dpu (simulated)") + box(
-        "gy", "GPUs and models", "4 &times; A10 from fake-gpu-operator, vLLM simulator", "node: gpu") + '</div>'
+        "f5", "BNK 2.4 &middot; owns the request", "Front door per tenant, 429 before the GPU, Endpoint Picker "
+        "(vLLM and Dynamo modes), token metering at the edge", "node: dpu (simulated)") + box(
+        "gy", "GPUs and models", "4 &times; A10 from fake-gpu-operator, vLLM twin and Dynamo Mocker workers", "node: gpu") + '</div>'
     rows = [
         ("Real", "#3d6b00", "BNK 2.4 data and control plane, Run:ai control plane and scheduler, "
-         "Kubernetes, the controller, the 429s, the Endpoint Picker, the metrics path"),
-        ("Simulated", "#5d6470", "GPUs (fake-gpu-operator), model servers (vLLM simulator, synthetic tokens), "
-         "the BlueField DPU (a separate node with a tunnel)"),
+         "Kubernetes, the controller, the 429s, the Endpoint Picker, the metrics path, the Dynamo operator "
+         "and its KV-cache events, both MCP servers and the LLM the agent talks to"),
+        ("Simulated", "#5d6470", "GPUs (fake-gpu-operator), model servers (vLLM twin and Dynamo Mocker: real tokenizer, "
+         "no model weights), the BlueField DPU (a separate node with a tunnel)"),
         ("Design intent", "#c4001f", "On a BlueField-3, TMM runs on the DPU and frees host CPU for the GPU "
          "server. Not measured in this lab."),
     ]
@@ -200,14 +204,14 @@ def build(h) -> dict:
              c(h.NV, "Run:ai", "Written back", "tokens-total on the Project, rolled up into the Department.")]), 1600, 900),
         "notes-06": (s(
             "Challenge 6 &middot; Debrief",
-            "What you built, <em>and what's next</em>.",
+            "What you built, and <em>an agent that runs it</em>.",
             "One tenant model for the AI factory: Run:ai decides who gets GPUs, BNK decides how requests "
-            "reach them, and an open-source controller keeps the two in step.",
+            "reach them, and an open-source controller keeps the two in step. Last, an AI agent drives it all over MCP.",
             [c(h.NV, "Real", "Real software", "BNK 2.4 and open-source Run:ai, on a real Kubernetes cluster."),
-             c(h.BL, "Simulated", "Simulated hardware", "GPUs, model servers and the DPU. The lab says where."),
+             c(h.BL, "MCP", "Ask in plain English", "Any LLM, NVIDIA's Run:ai MCP server and bnk-tenancy-mcp. You approve each change."),
              c(h.F5, "Next", "BlueField-3", "TMM on the DPU, host CPU freed. Design intent, not measured here.")]), 1600, 900),
         "02-tenant-flow": (tenant_flow(), 1400, 372),
         "03-isolation": (isolation(), 1400, 300),
         "04-metering": (metering(), 1400, 318),
-        "06-recap": (recap(), 1400, 410),
+        "06-recap": (recap(), 1400, 560),
     }
