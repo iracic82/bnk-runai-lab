@@ -287,7 +287,7 @@ export BNK_TMM_MTU=1400
 # that, on a CPU-tight cluster, leaves the new pod Pending (verified live 2026-10-07).
 # Run:ai creates a namespace per project; the F5 Endpoint Picker only serves namespaces listed at
 # install time (a later patch rolls the controller), so the lab's project namespaces go in now.
-export BNK_EPP_NAMESPACES="${BNK_EPP_NAMESPACES:-runai-tenant-a,runai-tenant-b}"
+export BNK_EPP_NAMESPACES="${BNK_EPP_NAMESPACES:-runai-tenant-a,runai-tenant-b,runai-tenant-c,runai-dynamo}"
 # profiles/host.env is sourced by the installer AFTER these exports; older bnk-deploy revisions assign
 # BNK_NETWORK_ATTACHMENTS= and BNK_TMM_MTU=1500 bare, which silently wipes ours and TMM comes up with
 # no data legs (verified live 2026-10-07). Make those lines respect the caller. No-op once bnk-deploy

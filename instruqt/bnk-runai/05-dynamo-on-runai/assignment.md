@@ -132,28 +132,34 @@ The text is filler from Mocker. The path is real: BNK VIP, Dynamo frontend, rout
 The frontend runs with `--router-mode kv`. It tracks which worker holds which prompt blocks and sends
 a repeated prefix back to the worker that has it cached.
 
-Send ten different prompts. They spread across both workers:
-
-```bash,run
-for i in $(seq 1 10); do
-  curl -s http://$VIP:8000/v1/chat/completions -H 'Content-Type: application/json' -d "{
-    \"model\": \"$MODEL\", \"max_tokens\": 8, \"nvext\": {\"extra_fields\": [\"worker_id\"]},
-    \"messages\": [{\"role\": \"user\", \"content\": \"Prompt number $i $RANDOM about something new\"}]}" \
-  | jq -r '.nvext.worker_id.decode_worker_id'
-done | sort | uniq -c
-```
-
-Now one long shared prefix, ten times. The router keeps choosing the worker that already holds it:
+First, one long shared prefix, eight times. The router sends it back to the worker that already holds
+it in cache:
 
 ```bash,run
 DOC=$(printf 'Our refund policy says the following. %.0s' $(seq 1 60))
-for i in $(seq 1 10); do
+for i in $(seq 1 8); do
   curl -s http://$VIP:8000/v1/chat/completions -H 'Content-Type: application/json' -d "{
     \"model\": \"$MODEL\", \"max_tokens\": 8, \"nvext\": {\"extra_fields\": [\"worker_id\"]},
     \"messages\": [{\"role\": \"user\", \"content\": \"$DOC Question $i?\"}]}" \
   | jq -r '.nvext.worker_id.decode_worker_id'
 done | sort | uniq -c
 ```
+
+One worker ID, eight times. Now sixteen different long prompts, all at once. With no shared cache to
+follow, the router balances on load, and the work spreads over both workers:
+
+```bash,run
+for i in $(seq 1 16); do
+  T=$(printf "Topic $i: tenant $i runs model $i on rack $i. %.0s" $(seq 1 60))
+  curl -s http://$VIP:8000/v1/chat/completions -H 'Content-Type: application/json' -d "{
+    \"model\": \"$MODEL\", \"max_tokens\": 64, \"nvext\": {\"extra_fields\": [\"worker_id\"]},
+    \"messages\": [{\"role\": \"user\", \"content\": \"$T\"}]}" \
+  | jq -r '.nvext.worker_id.decode_worker_id' &
+done | sort | uniq -c; wait
+```
+
+Sent one at a time to idle workers, different prompts mostly land on the same worker: with no cache
+hit and no load to weigh, the router's tie-break wins. Concurrency is what makes it spread.
 
 You can also pin a request to one worker with the `x-dynamo-worker-instance-id` header. Take an ID from
 the output above:
@@ -177,6 +183,26 @@ The router and worker logs show the same story from the inside:
 kubectl -n $NS logs deploy/dynamo-frontend --tail=20
 kubectl -n $NS logs -l app=dynamo-decode --prefix --tail=10
 ```
+
+# Two pickers, one front door
+
+You have now met two schedulers that choose where a request goes:
+
+| Path | Who picks the backend | Signal |
+|---|---|---|
+| `tenant-a`, `tenant-b` (vLLM servers) | BNK's **F5 Endpoint Picker** (F5EPP) | queue depth and prefix cache, per replica |
+| `dynamo` | **Dynamo's KV router**, inside the frontend | KV blocks held per worker, and load |
+
+For Dynamo, BNK sends traffic to the frontend and lets Dynamo pick the worker: the Mocker workers do not
+serve HTTP themselves, so there is nothing for BNK's picker to choose between. BNK still gives the
+Dynamo project the same front door, rate limit, tenant header and token metering as every other tenant.
+
+```bash,run
+kubectl get f5-epps -A
+```
+
+> F5 has announced deeper BNK and Dynamo integration, with BNK using Dynamo's routing signals. BNK 2.4
+> has no documented setting for it, so this lab does not show it.
 
 # 5. Optional: disaggregated serving
 
