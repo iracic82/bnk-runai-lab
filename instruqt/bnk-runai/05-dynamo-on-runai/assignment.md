@@ -3,8 +3,9 @@ slug: dynamo-on-runai
 id: xwkxzgxmirw3
 type: challenge
 title: NVIDIA Dynamo, with BNK picking the worker
-teaser: Dynamo runs as a Run:ai project. BNK's Endpoint Picker reads Dynamo's own KV-cache
-  events and sends each request to the Dynamo worker that already holds its prompt.
+teaser: Dynamo runs as a Run:ai project. BNK's Endpoint Picker reads Dynamo's own
+  KV-cache events and sends each request to the Dynamo worker that already holds its
+  prompt.
 notes:
 - type: image
   url: ../assets/notes-05-dynamo.png
@@ -96,9 +97,20 @@ half a GPU each:
 kubectl -n $NS get pods -o custom-columns='POD:.metadata.name,NODE:.spec.nodeName,SCHEDULER:.spec.schedulerName,QUEUE:.metadata.labels.runai/queue,GPU:.metadata.annotations.gpu-fraction'
 ```
 
-Each worker pod has two containers: the Mocker worker, and a small Dynamo frontend in **direct
-mode**. Direct mode does no routing of its own. It serves whichever worker the request names, and
-refuses a request that names none. Someone else has to pick. That someone is BNK.
+You should see four pods. The two `mocker-decode` pods are the workers, on the gpu node at `0.5` GPU
+each. `mocker-frontend` is Dynamo's own frontend and router. It needs no GPU, and BNK doesn't send
+traffic through it. `model-pool-epp` is BNK's Endpoint Picker for this project, on the dpu node next to
+TMM. The tenancy controller created it, and you'll look at it in the next step.
+
+Each worker pod has two containers:
+
+```bash,run
+kubectl -n $NS get pods -l nvidia.com/dynamo-component-type=decode -o custom-columns='POD:.metadata.name,CONTAINERS:.spec.containers[*].name'
+```
+
+One is the Mocker worker. The other is a small Dynamo frontend in **direct mode**. Direct mode does no
+routing of its own. It serves whichever worker the request names, and refuses a request that names
+none. Someone else has to pick. That someone is BNK.
 
 ---
 
@@ -141,8 +153,8 @@ curl -si http://$VIP:8000/v1/chat/completions -H 'Content-Type: application/json
 
 **You should see:** `HTTP/1.1 200`, `X-BNK-Tenant: dynamo`, and the ID of the worker that answered.
 
-That ID came from BNK. The picker chose the worker and wrote its ID into the request; the direct-mode
-frontend in that pod served exactly that worker.
+That ID came from BNK. The picker chose the worker and wrote its ID into the request. The direct-mode
+frontend in that pod then served exactly that worker.
 
 ---
 
@@ -192,6 +204,9 @@ quota, and the same metering apply:
 kubectl get f5-big-cne-irules -n f5-bnk dynamo-limit -o jsonpath='{.spec.iRule}' | grep -o 'rl_n > [0-9]*'
 kubectl -n bnk-runai-tenancy get cm bnk-runai-usage -o jsonpath='{.data}' | jq 'with_entries(select(.key|test("dynamo")))'
 ```
+
+**You should see:** `rl_n > 20`, the 20 req/s that one GPU of quota buys, and a token total for
+`project.dynamo` in the usage ledger. Those are the requests you just sent, counted at the BNK edge.
 
 ---
 
