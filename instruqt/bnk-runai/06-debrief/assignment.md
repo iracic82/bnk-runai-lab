@@ -67,14 +67,18 @@ kubectl get gateway -n f5-bnk -o wide -L tenancy.f5.com/project
 kubectl -n bnk-runai-tenancy get cm bnk-runai-usage -o jsonpath='{.data}' | jq .
 ```
 
+**You should see:** every check `ok`, three Run:ai projects (`dynamo`, `tenant-a`, `tenant-b`) all
+`Ready`, one Programmed BNK Gateway per project on its own address, and a ledger where
+`department.default` is the sum of its three projects.
+
 ---
 
 ## What is real, and what is simulated
 
 | | |
 |---|---|
-| **Real** | BNK 2.4 (TMM and its controllers), open-source Run:ai and its scheduler, Kubernetes, the tenancy controller and token meter, the 429s, the Endpoint Picker, the metrics path, the Dynamo operator and its KV-cache events, BNK's Endpoint Picker in Dynamo mode |
-| **Simulated** | the GPUs (NVIDIA fake-gpu-operator), the model servers (vLLM simulator and Dynamo Mocker, so tokens and latencies are modelled), the BlueField DPU (a node joined to the GPU node by a tunnel) |
+| **Real** | BNK 2.4 (TMM and its controllers), open-source Run:ai and its scheduler, Kubernetes, the tenancy controller and token meter, the 429s, the Endpoint Picker, the metrics path, the Dynamo operator and its KV-cache events, BNK's Endpoint Picker in Dynamo mode, both MCP servers and the LLM the agent uses |
+| **Simulated** | the GPUs (NVIDIA fake-gpu-operator), the model servers (a vLLM twin and Dynamo Mocker: the real tokenizer, but no model weights, so answers and latencies are modelled), the BlueField DPU (a node joined to the GPU node by a tunnel) |
 | **Not shown** | GPU memory isolation, DPU offload, host-CPU savings |
 
 ---
@@ -120,7 +124,10 @@ python3 /root/lab/platform/mcp/agent.py "Create a Run:ai project called agent-de
 Watch the tool calls go by. The agent looks up the node pool and the department, then asks Run:ai for
 a dry run, which changes nothing. Before the real change it stops and shows you what it is about to do.
 Type `y` to approve. After that it only asks BNK questions, and its answer ends with the VIP, the rate
-limit of 20 req/s from the one GPU, and a token count of 0.
+limit of 20 req/s from the one GPU, and no tokens metered yet.
+
+An LLM doesn't always get a tool call right first time. If a call comes back with an `ERROR`, the agent
+reads the error and tries again, the way a person would. Nothing changes until you approve.
 
 If the agent can't reach its LLM, the same steps run without one:
 
