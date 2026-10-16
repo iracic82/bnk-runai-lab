@@ -29,6 +29,8 @@ bash "$LAB_ROOT/platform/runai/install.sh" 2>&1 | tee /root/setup/runai.log
 # Lab layer: the tenancy controller, the token meter, Prometheus + Grafana, and the browser for the Run:ai UI.
 step() { echo "==== $(date +%H:%M:%S) $*"; }
 {
+  # Stop at the first failed step, so a broken lab layer fails setup instead of finishing quietly.
+  set -e
   step "tenancy controller + token meter (Helm chart)"
   # Prometheus Operator CRDs already exist (the Run:ai install adds them), so the chart's monitors render.
   command -v helm >/dev/null || fail "helm missing"
