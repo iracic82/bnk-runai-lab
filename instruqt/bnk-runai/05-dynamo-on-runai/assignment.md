@@ -20,6 +20,9 @@ tabs:
   hostname: control
   path: /topology.html
   port: 3002
+- title: Terminal 2
+  type: terminal
+  hostname: control
 - id: jjnylqablyud
   title: Run:ai UI
   type: service
