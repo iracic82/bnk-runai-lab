@@ -999,7 +999,7 @@
       "id": 17,
       "type": "timeseries",
       "title": "vLLM: requests per replica",
-      "description": "Requests each model-server replica finished per second (vllm:request_success_total by pod). Shows where BNK's Endpoint Picker sent the traffic: prompts that start the same way stay on the replica that holds them, so a few distinct prefixes can all land on one replica.",
+      "description": "Requests each model-server replica finished per second (vllm:request_success_total by pod). Shows where BNK's Endpoint Picker sent the traffic: prompts that start the same way stay on the replica that holds them, so a few distinct prefixes can all land on one replica. Stacked: each band is one replica, the top edge is the tenant's total.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1026,10 +1026,11 @@
           "unit": "reqps",
           "custom": {
             "lineWidth": 2,
-            "fillOpacity": 10,
+            "fillOpacity": 35,
             "showPoints": "never",
             "stacking": {
-              "mode": "none"
+              "mode": "normal",
+              "group": "A"
             }
           },
           "min": 0,
