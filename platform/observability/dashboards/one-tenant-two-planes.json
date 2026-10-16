@@ -927,7 +927,7 @@
       "gridPos": {
         "x": 0,
         "y": 22,
-        "w": 6,
+        "w": 5,
         "h": 7
       },
       "targets": [
@@ -996,18 +996,71 @@
       }
     },
     {
-      "id": 14,
+      "id": 17,
       "type": "timeseries",
-      "title": "vLLM: KV cache usage",
-      "description": "vllm:kv_cache_usage_perc per replica (0..1).",
+      "title": "vLLM: requests per replica",
+      "description": "Requests each model-server replica finished per second (vllm:request_success_total by pod). Shows where BNK's Endpoint Picker sent the traffic: prompts that start the same way stay on the replica that holds them, so a few distinct prefixes can all land on one replica.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "x": 6,
+        "x": 5,
         "y": 22,
-        "w": 6,
+        "w": 5,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "refId": "A",
+          "expr": "sum by (pod) (rate(vllm:request_success_total{project=\"$project\"}[1m]))",
+          "legendFormat": "{{pod}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "min": 0,
+          "noValue": "No vLLM model in this project yet (labctl model deploy). Dynamo projects run Mocker workers."
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "vLLM: KV cache usage",
+      "description": "vllm:kv_cache_usage_perc per replica: the share of KV blocks held by requests running at this instant. Requests here finish in about 0.25 s, so most scrapes see none running and the line stays near zero. Use requests per replica to see where traffic goes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 15,
+        "y": 22,
+        "w": 5,
         "h": 7
       },
       "targets": [
@@ -1059,9 +1112,9 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "x": 12,
+        "x": 10,
         "y": 22,
-        "w": 6,
+        "w": 5,
         "h": 7
       },
       "targets": [
@@ -1113,9 +1166,9 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "x": 18,
+        "x": 20,
         "y": 22,
-        "w": 6,
+        "w": 4,
         "h": 7
       },
       "targets": [

@@ -155,8 +155,10 @@ has those tokens cached, so it skips recomputing them. On a real GPU that's pref
 Nothing here is specific to this lab. The picker works on Run:ai inference pods as they are. BNK already
 ships it, and all the tenancy controller does is set one up for each project.
 
-**In Grafana**, look at the tenant-a row. **vLLM: prefix-cache hit rate** climbs, and **vLLM: KV cache
-usage** shows the work spread over both replicas.
+**In Grafana**, look at the tenant-a row. **vLLM: prefix-cache hit rate** climbs toward 100%: almost every
+prompt start was already cached where it landed. **vLLM: requests per replica** shows where BNK sent each
+request. With only a few distinct prompt starts, most of them can stick to one replica. That's the picker
+keeping a prefix where its cache is, not a replica sitting idle.
 
 ---
 
