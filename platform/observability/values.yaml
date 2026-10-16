@@ -179,6 +179,8 @@ grafana:
       enabled: true
       defaultDatasourceEnabled: true
       uid: prometheus
+  # 512Mi was OOMKilled five times in 30 minutes with the board on 5s refresh across all projects
+  # (2026-10-16). The control node has the memory to spare.
   resources:
-    requests: {cpu: 100m, memory: 128Mi}
-    limits: {memory: 512Mi}
+    requests: {cpu: 200m, memory: 512Mi}
+    limits: {memory: 2Gi}
