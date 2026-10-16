@@ -70,12 +70,12 @@ def tenant_flow() -> str:
 
     def bnk(name, rps, crit):
         return box("f5", f"BNK tenant {name}",
-                   f'<span class="chip">Gateway tenant-{name}</span><span class="chip">VIP :8000</span><br>'
+                   f'<span class="chip">Gateway {name}</span><span class="chip">VIP :8000</span><br>'
                    f'<span class="chip">HTTPRoute</span><span class="chip">InferencePool</span><span class="chip">F5EPP</span><br>'
                    f'<span class="chip">iRule <span class="num">{rps} req/s</span></span><span class="chip">NetPolicy</span>'
                    f'&nbsp;<b>{crit}</b>', "f5-bnk + tenant ns")
     out = '<div class="col" style="width:470px">' + bnk("tenant-a", 40, "Critical") + bnk("tenant-b", 10, "Sheddable") + '</div>'
-    body = ('<div class="row">' + runai + arrow("watch<br>Project + Queue") + ctrl
+    body = ('<div class="row">' + runai + arrow("watch<br>Project") + ctrl
             + arrow("server-side<br>apply") + out + '</div>'
             '<div class="legend">tenant-a: 20 &times; 2 = 40 req/s. tenant-b: 20 &times; 0.5 = 10 req/s. '
             'Change tenant-b to 1 GPU and its iRule becomes 20 req/s. Every object carries the label '
@@ -133,13 +133,14 @@ def metering() -> str:
     outs = '<div class="col" style="width:330px">' + box(
         "gy", "Prometheus + Grafana", "dashboard <b>One tenant, two planes</b><br>tokens per project, per department, per GPU",
         "node: control") + box(
-        "nv", "Write-back to Run:ai", "Project tenant-a<br><span class='mono'>tenancy.f5.com/tokens-total</span><br>"
-        "Department default: sum of its projects", "kai.resources") + '</div>'
+        "nv", "Ledger + Run:ai events", "ConfigMap <span class='mono'>bnk-runai-usage</span>: "
+        "<span class='mono'>project.tenant-a</span>, <span class='mono'>department.default</span><br>"
+        "TokensMetered events on the Project and Department", "node: control") + '</div>'
     body = ('<div class="row">' + req + arrow("response") + edge + arrow("counts") + meter
-            + arrow("scrape<br>+ annotate") + outs + '</div>'
-            '<div class="legend">Tokens are counted where every request already passes: the BNK edge. Run:ai sees the '
-            'result on its own objects, so GPU share and token use sit side by side. Token counts here come from the '
-            'vLLM simulator, so the numbers are synthetic; the path is real.</div>')
+            + arrow("scrape<br>+ write back") + outs + '</div>'
+            '<div class="legend">Tokens are counted where every request already passes: the BNK edge. Totals land in a ledger '
+            'and as events on the Run:ai objects, so GPU share and token use sit side by side. Run:ai only lets its own '
+            'services write Projects, so the totals cannot live on them. The model servers tokenize prompts for real.</div>')
     return diag("Tokens metered per Run:ai project, at the edge", body, 1400)
 
 
@@ -153,7 +154,7 @@ def recap() -> str:
         "nv", "Run:ai &middot; owns the GPU", "Projects, departments, quotas, priority, GPU fractions, scheduling. "
         "NVIDIA Dynamo runs as one more project", "node: runai + gpu") + box(
         "am", "Tenancy controller + token meter &middot; open source", "Project &rarr; Gateway, route, pool, picker, "
-        "rate limit, priority. Tokens &rarr; Prometheus and back onto the Project", "node: control") + box(
+        "rate limit, priority. Tokens &rarr; Prometheus, a usage ledger and Run:ai events", "node: control") + box(
         "f5", "BNK 2.4 &middot; owns the request", "Front door per tenant, 429 before the GPU, Endpoint Picker "
         "(vLLM and Dynamo modes), token metering at the edge", "node: dpu (simulated)") + box(
         "gy", "GPUs and models", "4 &times; A10 from fake-gpu-operator, vLLM twin and Dynamo Mocker workers", "node: gpu") + '</div>'
@@ -198,10 +199,10 @@ def build(h) -> dict:
             "Challenge 4 &middot; Tokens per project",
             "Who used the tokens?<br><em>Answered per Run:ai project.</em>",
             "BNK counts tokens where every request passes anyway. The counts land in Grafana next to GPU "
-            "share, and are written back onto the Run:ai project and its department.",
+            "share, and are kept in a ledger per Run:ai project and department.",
             [c(h.F5, "Edge", "Counted by BNK", "From the usage block each model response already carries."),
              c(h.AM, "Meter", "Prometheus metrics", "bnk_tokens_total by project, department, model, direction."),
-             c(h.NV, "Run:ai", "Written back", "tokens-total on the Project, rolled up into the Department.")]), 1600, 900),
+             c(h.NV, "Run:ai", "Per project and department", "A usage ledger plus TokensMetered events on the Run:ai objects.")]), 1600, 900),
         "notes-06": (s(
             "Challenge 6 &middot; Debrief",
             "What you built, and <em>an agent that runs it</em>.",

@@ -49,7 +49,7 @@ from the GPU quota. When a project went away, so did its BNK config.
 
 Then you saw why that matters on shared GPUs. `tenant-b` was refused at the edge with a 429 once it
 went over its share, and `tenant-a`, on the same GPU, kept its latency. Tokens were counted per
-project at the edge and written back onto the Run:ai Project and its department.
+project at the edge and kept in a ledger per Run:ai project and department.
 
 Finally, NVIDIA Dynamo ran as one more Run:ai project, and BNK went a step further than a front door.
 Its Endpoint Picker listened to the KV-cache events Dynamo's workers publish and sent each request to

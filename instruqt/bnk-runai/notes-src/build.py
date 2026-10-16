@@ -60,12 +60,12 @@ SLIDES = {
     "notes-01-real": slide(
         "What is real in this lab",
         "Real software. <em>Simulated hardware.</em>",
-        "Everything you touch is the real product: BNK 2.4 and the open-source Run:ai control plane and "
-        "scheduler, on a four-node Kubernetes cluster. Only the hardware is simulated, and the lab says "
-        "where.",
+        "Everything you touch is the real product: BNK 2.4, the open-source Run:ai control plane and "
+        "scheduler, and NVIDIA Dynamo, on a four-node Kubernetes cluster. Only the hardware is simulated, "
+        "and the lab says where.",
         [card(NV, "GPUs", "fake-gpu-operator", "NVIDIA's own GPU simulator: 4 &times; A10 on the gpu node, scheduled by Run:ai for real."),
-         card(BL, "Models", "vLLM simulator", "OpenAI-compatible, real vLLM metrics, latency that grows with load."),
-         card(AM, "DPU", "Simulated BlueField", "A separate node with a tunnel to the GPU node. The path is real; offload is not measured here.")]),
+         card(BL, "Models", "vLLM twin, Dynamo Mocker", "Real tokenizer, no model weights. Mocker is NVIDIA's own Dynamo worker simulator."),
+         card(AM, "DPU", "Simulated BlueField", "A separate node with a tunnel to the GPU node. The path is real, the offload is not measured here.")]),
 }
 
 ARCH = """<!doctype html><html><head><meta charset="utf-8">

@@ -4,7 +4,7 @@ id: b4dv4wqs5rjq
 type: challenge
 title: Tokens per project
 teaser: BNK counts tokens per Run:ai project at the edge, shows them next to GPU share,
-  and writes the totals back onto the Run:ai project and its department.
+  and keeps the totals per Run:ai project and department.
 notes:
 - type: image
   url: ../assets/notes-04.png
@@ -88,7 +88,8 @@ labctl dash
 ```
 
 > A fair caveat: BNK does the counting, but the numbers are whatever the model reported. The models here
-> are simulators, so the counts are synthetic. The path from response to Run:ai object is the real one.
+> are simulators. They tokenize every prompt with the real tokenizer, but the answers are generated text,
+> not a model's output. The path from response to Run:ai ledger is the real one.
 
 ---
 
