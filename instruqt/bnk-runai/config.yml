@@ -28,10 +28,10 @@ virtualmachines:
 # Run:ai control plane (about 50 services incl. Keycloak, Postgres, NATS), kept off the BNK nodes.
 - name: runai
   image: f5/bnk-f5
-  # 24 vCPU: the Run:ai control plane, the tenancy controller and both MCP servers all pin here; at 16 the
-  # CPU requests filled the node and new pods stayed Pending. A 32-vCPU runai node (72 vCPU per sandbox)
-  # was torn down by Instruqt mid-setup (2026-10-16).
-  machine_type: n2-standard-24
+  # 32 vCPU: the Run:ai control plane, the tenancy controller and both MCP servers all pin here; at 16 the
+  # CPU requests filled the node and new pods stayed Pending. Booted cleanly at 32 (2026-10-16). Instruqt
+  # only accepts listed machine types, and n2-standard-24 is not one of them.
+  machine_type: n2-standard-32
   shell: /bin/bash
 # Team secrets (write only): FAR_PULL_B64 F5 registry credential, BNK_LICENSE_JWT licence,
 # GH_READ_TOKEN read-only token for the private lab repo, LLM_API_KEY NVIDIA API key (build.nvidia.com)
