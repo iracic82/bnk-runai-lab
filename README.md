@@ -1,18 +1,22 @@
 # BNK 2.4 with open-source NVIDIA Run:ai
 
-**Define a tenant once in Run:ai. F5 BIG-IP Next for Kubernetes (BNK) builds its front door, its rate
-limit and its token meter on its own.**
+**You define a tenant in Run:ai. F5 BIG-IP Next for Kubernetes (BNK) builds its front door, rate
+limit and token meter for you.**
 
-This repo is the source of a hands-on Instruqt lab. It runs a real four-node Kubernetes cluster with
-real BNK 2.4 and the open-source NVIDIA Run:ai platform, shared by several AI tenants. The GPUs are
-simulated, everything that decides who gets in, how fast, and on which worker is real.
+This is the source of an Instruqt lab I built for GTC Berlin. You get four VMs and one Kubernetes
+cluster running BNK 2.4 and the open-source NVIDIA Run:ai platform, with a few AI tenants sharing the
+same GPUs. The GPUs are fake. The rest is real software: the parts that decide whether a request gets
+in, how fast, and which worker serves it.
+
+A new Run:ai project has a working BNK front door about 30 seconds later. Nobody opens a BNK config.
 
 ![What you build in the lab](instruqt/bnk-runai/assets/06-recap.png)
 
 ## The idea in one picture
 
-Run:ai owns the GPU. BNK owns the request. A small open-source controller connects the two, so a
-platform team has one place to describe a tenant.
+Run:ai owns the GPU. BNK owns the request. Today a platform team has to describe every tenant twice,
+once on each side, and keep the two in sync by hand. The tenancy controller in this repo watches Run:ai
+and writes the BNK side, so there is only one place to get it right.
 
 ```mermaid
 flowchart LR
@@ -80,13 +84,14 @@ sequenceDiagram
     end
 ```
 
-The 429 happens at the BNK edge, before the GPU. A noisy tenant is stopped there, and its neighbour
-on the same GPU keeps its latency.
+The 429 comes from BNK, so an over-quota request never reaches a GPU. In challenge 3 BNK refused
+74% of `tenant-b`'s excess traffic while `tenant-a`, on the same GPU at the same moment, had nothing
+refused.
 
 ## The cluster
 
-Four VMs, one Kubernetes cluster. The DPU is a separate node joined to the GPU server by a tunnel,
-standing in for a BlueField DPU in the same server.
+On real hardware, BNK's data plane (TMM) runs on a BlueField-3 DPU inside the GPU server. Here the DPU
+is its own VM, joined to the GPU node by a GRE tunnel that plays the part of the PCIe link.
 
 ```mermaid
 flowchart TB
@@ -112,8 +117,9 @@ flowchart TB
     dpu <-->|"gretap 'PCIe' link"| gpu
 ```
 
-The interactive version, with animated flows for each challenge, is
-[`platform/topology/topology.html`](platform/topology/topology.html). Open it in a browser.
+There's an interactive version with an animated flow for each challenge:
+[`platform/topology/topology.html`](platform/topology/topology.html). It's a single file, so you can
+open it straight in a browser.
 
 ## The challenges
 
@@ -139,9 +145,10 @@ The interactive version, with animated flows for each challenge, is
 
 ## Dynamo, with BNK picking the worker
 
-NVIDIA Dynamo runs as one more Run:ai project. Its workers publish every KV-cache block they store or
-evict on NATS. BNK's Endpoint Picker, in Dynamo mode, subscribes to those events and sends each request
-straight to the worker that already holds the prompt. Dynamo's own router is not in the path.
+This is the part people ask about most. NVIDIA Dynamo runs as just another Run:ai project. Each
+worker announces on NATS every KV-cache block it stores or evicts. BNK 2.4's Endpoint Picker has a
+Dynamo mode that listens to those announcements, works out which worker already holds the prompt, and
+sends the request there. Dynamo's own router isn't used.
 
 ```mermaid
 flowchart LR
@@ -153,14 +160,16 @@ flowchart LR
     nats -->|subscribe| epp
 ```
 
-In the lab, two different long prompts each stay on one worker six times out of six. A
-NetworkPolicy lets only Dynamo tenants reach NATS, so no other pod can read or fake those events.
-Details in [`docs/dynamo-research.md`](docs/dynamo-research.md).
+In the lab you send two long prompts six times each. Each one lands on the same worker all six
+times. NATS has no authentication, so a NetworkPolicy keeps everyone but Dynamo tenants off it. Without
+that, any pod could forge cache events and steer the picker. The notes are in
+[`docs/dynamo-research.md`](docs/dynamo-research.md).
 
 ## An AI agent that runs it
 
-Challenge 6 hands the same job to an agent. It talks to two MCP servers and any OpenAI-compatible
-LLM (the lab uses NVIDIA Nemotron on build.nvidia.com).
+In challenge 6 you ask an agent for a tenant in plain English. It's about 250 lines of plain Python with no
+framework. It talks to NVIDIA's Run:ai MCP server, to our read-only `bnk-tenancy-mcp`, and to any
+OpenAI-compatible model. The lab uses Nemotron on build.nvidia.com.
 
 ```mermaid
 sequenceDiagram
@@ -179,9 +188,9 @@ sequenceDiagram
     A->>U: agent-demo is live at its VIP
 ```
 
-Every write needs a person to approve it. The approval gate fails closed: any tool not on the
-read-only list is treated as a write. See [`platform/mcp/agent.py`](platform/mcp/agent.py) and
-[`docs/mcp.md`](docs/mcp.md).
+A person approves every change. The gate fails closed: a tool counts as a write unless it's on a
+short read-only list, so a new or renamed tool can't slip through. Code in
+[`platform/mcp/agent.py`](platform/mcp/agent.py), design notes in [`docs/mcp.md`](docs/mcp.md).
 
 ## Real and simulated
 
@@ -208,7 +217,7 @@ read-only list is treated as a write. See [`platform/mcp/agent.py`](platform/mcp
 
 ## Try the CLI
 
-Inside the lab, on the control node:
+On the control node inside the lab:
 
 ```bash
 labctl tenant create tenant-a --gpu 1 --priority High
