@@ -10,22 +10,19 @@ in, how fast, and which worker serves it.
 
 A new Run:ai project has a working BNK front door about 30 seconds later. Nobody opens a BNK config.
 
-<a href="docs/images/topology-diagram.png"><img src="docs/images/topology-diagram.png" alt="Lab topology: four nodes, the Run:ai control plane, BNK on the simulated DPU, models on the GPU node"></a>
+### ▶ [Open the interactive lab topology](https://iracic82.github.io/bnk-runai-lab/platform/topology/topology.html)
 
-<sub>The lab's topology page, the same one learners see in the Topology tab. Click it for full size.
-The <a href="docs/images/topology-page.png">whole page</a> has the eight flows, addresses and the
-real versus simulated list.</sub>
+The same page learners have in the lab's Topology tab. Pick a flow and watch the packets travel
+across the four nodes, step by step: define a tenant, chat, over its share, cross-tenant route,
+Dynamo, token metering, AI agent, delete. Click any box to see what it is and its real address.
 
 **Contents:** [The idea](#the-idea-in-one-picture) · [What the lab shows](#what-the-lab-shows) ·
 [A request](#what-a-request-goes-through) · [The cluster](#the-cluster) · [Challenges](#the-challenges) ·
 [Dynamo](#dynamo-with-bnk-picking-the-worker) · [AI agent](#an-ai-agent-that-runs-it) ·
 [Real and simulated](#real-and-simulated) · [Repo map](#what-is-in-this-repo)
 
-> **Interactive packet-flow topology:** **[open it live](https://iracic82.github.io/bnk-runai-lab/platform/topology/topology.html)**.
-> Pick a flow (define a tenant, chat, over its share, cross-tenant route, Dynamo, token metering,
-> AI agent, delete) and watch the packets travel, step by step. Click any box to see what it is.
-> The architecture view of BNK inside NVIDIA's Run:ai stack is
-> [here](https://iracic82.github.io/bnk-runai-lab/docs/visuals/lab-topology.html).
+> The architecture view, BNK inside NVIDIA's Run:ai stack, is
+> [live here](https://iracic82.github.io/bnk-runai-lab/docs/visuals/lab-topology.html).
 
 > **Tip:** every diagram below is live Mermaid. Hover it on GitHub to get zoom, pan and a full-screen
 > button.
@@ -181,10 +178,8 @@ flowchart LR
     class models,dyn g
 ```
 The interactive version animates each of the eight flows above:
-**[open the packet-flow topology](https://iracic82.github.io/bnk-runai-lab/platform/topology/topology.html)**
-(source: [`platform/topology/topology.html`](platform/topology/topology.html), one self-contained file).
-
-<a href="docs/images/topology-page.png"><img src="docs/images/topology-page.png" width="420" alt="The full lab topology page"></a>
+**[open the packet-flow topology](https://iracic82.github.io/bnk-runai-lab/platform/topology/topology.html)** (source:
+[`platform/topology/topology.html`](platform/topology/topology.html), one self-contained file).
 
 ## The challenges
 
