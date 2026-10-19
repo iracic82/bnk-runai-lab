@@ -10,7 +10,19 @@ in, how fast, and which worker serves it.
 
 A new Run:ai project has a working BNK front door about 30 seconds later. Nobody opens a BNK config.
 
-![What you build in the lab](instruqt/bnk-runai/assets/06-recap.png)
+<a href="docs/images/topology-diagram.png"><img src="docs/images/topology-diagram.png" alt="Lab topology: four nodes, the Run:ai control plane, BNK on the simulated DPU, models on the GPU node"></a>
+
+<sub>The lab's topology page, the same one learners see in the Topology tab. Click it for full size.
+The <a href="docs/images/topology-page.png">whole page</a> has the eight flows, addresses and the
+real versus simulated list.</sub>
+
+**Contents:** [The idea](#the-idea-in-one-picture) · [What the lab shows](#what-the-lab-shows) ·
+[A request](#what-a-request-goes-through) · [The cluster](#the-cluster) · [Challenges](#the-challenges) ·
+[Dynamo](#dynamo-with-bnk-picking-the-worker) · [AI agent](#an-ai-agent-that-runs-it) ·
+[Real and simulated](#real-and-simulated) · [Repo map](#what-is-in-this-repo)
+
+> **Tip:** every diagram below is live Mermaid. Hover it on GitHub to get zoom, pan and a full-screen
+> button.
 
 ## The idea in one picture
 
@@ -20,35 +32,52 @@ and writes the BNK side, so there is only one place to get it right.
 
 ```mermaid
 flowchart LR
-    admin(["Platform admin"])
-    agent(["AI agent<br/>any LLM, over MCP"])
+    admin(["👤 Platform admin<br/>Run:ai UI · API · labctl"])
+    agent(["🤖 AI agent<br/>any LLM over MCP"])
+    client(["💻 Tenant app<br/>any OpenAI SDK"])
 
-    subgraph RUNAI["NVIDIA Run:ai"]
-        proj["Project + quota<br/>priority, department"]
+    subgraph RUNAI["NVIDIA Run:ai · owns the GPU"]
+        proj["Project tenant-a<br/>GPU quota · priority · department"]
+        sched["Scheduler<br/>GPU fractions"]
     end
 
-    subgraph CTRL["Tenancy controller (this repo)"]
+    subgraph CTRL["Tenancy controller · open source, this repo"]
         rec["Reconciler<br/>Project → BNK objects"]
-        meter["Token meter<br/>Prometheus, ledger, Run:ai events"]
+        meter["Token meter<br/>Prometheus · ledger · Run:ai events"]
     end
 
-    subgraph BNK["F5 BNK 2.4"]
-        gw["Gateway + VIP"]
-        rl["Rate limit<br/>from GPU quota"]
+    subgraph BNK["F5 BNK 2.4 · owns the request"]
+        gw["Gateway + VIP<br/>one per project"]
+        rl["Rate limit<br/>20 req/s × GPU quota"]
         epp["Endpoint Picker<br/>vLLM or Dynamo mode"]
     end
 
-    subgraph GPU["GPU server (simulated GPUs)"]
-        pool["Model pool<br/>vLLM twin / Dynamo Mocker"]
+    subgraph GPU["GPU node · simulated A10s"]
+        pool["Model replicas<br/>vLLM twin · Dynamo Mocker"]
     end
 
-    admin -->|"creates once"| proj
-    agent -->|"Run:ai MCP, human approves"| proj
-    proj -->|watch| rec
-    rec -->|creates| gw & rl & epp
-    client(["Tenant app"]) --> gw --> rl --> epp --> pool
-    gw -. tokens .-> meter
+    admin -->|"define once"| proj
+    agent -->|"Run:ai MCP · human approves"| proj
+    proj -.->|watch| rec
+    rec -.->|create| gw & rl & epp
+    sched -.->|place| pool
+    client ==> gw ==> rl ==> epp ==> pool
+    gw -.->|tokens| meter
+    meter -.->|"TokensMetered event"| proj
+
+    classDef runai fill:#eaf5d9,stroke:#76b900,color:#1d2a0a
+    classDef ctrl fill:#fff6dc,stroke:#d4a017,color:#3d2e00
+    classDef bnk fill:#fde8ea,stroke:#e4002b,color:#4a0010
+    classDef gpu fill:#ececec,stroke:#555,color:#111
+    classDef actor fill:#e6f3fb,stroke:#2b8ac6,color:#0b2a40
+    class proj,sched runai
+    class rec,meter ctrl
+    class gw,rl,epp bnk
+    class pool gpu
+    class admin,agent,client actor
 ```
+
+Thick lines are inference traffic. Dashed lines are configuration.
 
 What the controller builds from one Run:ai project:
 
@@ -59,6 +88,22 @@ What the controller builds from one Run:ai project:
 | Queue priority | The inference objective's criticality (100 and above is Critical) |
 | Namespace marked as running Dynamo | The Endpoint Picker in Dynamo mode, listening to Dynamo's KV-cache events |
 | Project deleted | Every BNK object for it removed |
+
+## What the lab shows
+
+These are the eight flows on the topology page. Every one runs live in the lab, and each has
+something on screen that proves it.
+
+| Flow | What happens | What proves it |
+|---|---|---|
+| **Define once** | Create a Run:ai project. Its BNK Gateway, route, picker and limit follow on their own | Project Ready → Gateway Programmed in about 30 s |
+| **Isolation** | A tenant over its GPU share gets a 429 at the BNK edge, before any GPU | `tenant-b` 74% of its excess refused, `tenant-a` 0% |
+| **Metering** | Tokens counted at BNK from every answer, booked to the Run:ai project and its department | Department total equals the sum of its projects |
+| **Workload map** | Run:ai places each model on a GPU fraction. BNK's picker chooses the replica | Grafana shows both planes for one tenant |
+| **NVIDIA Dynamo** | BNK reads Dynamo's KV-cache events and picks the worker | Each prompt on one worker, 6 out of 6 |
+| **Tenant boundary** | A route can't attach to another tenant's Gateway | `Accepted=False`, `NotAllowedByListeners` |
+| **Lifecycle** | Delete the project and BNK forgets the tenant | Every BNK object gone, Run:ai never written to |
+| **AI agent** | An agent asks for a tenant over MCP, a person approves, BNK builds it | Dry run → approve → VIP Programmed at 20 req/s |
 
 ## What a request goes through
 
@@ -94,32 +139,46 @@ On real hardware, BNK's data plane (TMM) runs on a BlueField-3 DPU inside the GP
 is its own VM, joined to the GPU node by a GRE tunnel that plays the part of the PCIe link.
 
 ```mermaid
-flowchart TB
-    subgraph control["control · n2-standard-16"]
-        k8s["Kubernetes control plane"]
-        tc["Tenancy controller + token meter"]
-        obs["Prometheus + Grafana"]
-        mcp["MCP servers<br/>Run:ai MCP :8080 · bnk-tenancy-mcp :8090"]
+flowchart LR
+    subgraph control["🖥️ control · n2-standard-16 · the glue"]
+        k8s["Kubernetes 1.30<br/>control plane"]
+        tc["Tenancy controller<br/>+ token meter :9102"]
+        obs["Prometheus + Grafana :3000"]
+        mcp["MCP servers<br/>Run:ai MCP :8080<br/>bnk-tenancy-mcp :8090"]
     end
-    subgraph runai["runai · n2-standard-32"]
-        rcp["Run:ai control plane<br/>about 50 services"]
+    subgraph runai["🟩 runai · n2-standard-32"]
+        rcp["Run:ai control plane<br/>UI · API · Keycloak · Postgres<br/>about 50 services"]
     end
-    subgraph dpu["dpu · n2-standard-8 (simulated BlueField)"]
-        tmm["BNK TMM data plane"]
-        pick["Endpoint Pickers"]
+    subgraph dpu["🟥 dpu · n2-standard-8 · simulated BlueField-3"]
+        bc["BNK controller<br/>Gateway API → TMM"]
+        tmm["BNK TMM<br/>one VIP per project<br/>172.16.201.110-149"]
+        pick["Endpoint Pickers<br/>vLLM mode · Dynamo mode"]
     end
-    subgraph gpu["gpu · n2-standard-16"]
-        fake["4 × A10 from fake-gpu-operator"]
-        sched["Run:ai scheduler, GPU fractions"]
-        models["vLLM twin replicas · Dynamo frontend + Mocker workers"]
-        nats["NATS (Dynamo events)"]
+    subgraph gpu["⬛ gpu · n2-standard-16 · 4 × A10 simulated"]
+        sched["Run:ai scheduler<br/>GPU fractions"]
+        models["vLLM twin replicas"]
+        dyn["Dynamo Mocker workers<br/>+ NATS"]
     end
-    dpu <-->|"gretap 'PCIe' link"| gpu
-```
+    rcp -.-> tc
+    tc -.-> bc --> tmm
+    tmm <==>|"GRE tunnel = PCIe link<br/>internal-net 10.1.20.0/24"| models & dyn
+    pick --- tmm
+    dyn -.->|KV events| pick
 
-There's an interactive version with an animated flow for each challenge:
-[`platform/topology/topology.html`](platform/topology/topology.html). It's a single file, so you can
-open it straight in a browser.
+    classDef c fill:#fff6dc,stroke:#d4a017,color:#3d2e00
+    classDef r fill:#eaf5d9,stroke:#76b900,color:#1d2a0a
+    classDef d fill:#fde8ea,stroke:#e4002b,color:#4a0010
+    classDef g fill:#ececec,stroke:#555,color:#111
+    class k8s,tc,obs,mcp c
+    class rcp,sched r
+    class bc,tmm,pick d
+    class models,dyn g
+```
+There's an interactive version with an animated flow for each of the eight flows above:
+[`platform/topology/topology.html`](platform/topology/topology.html). It's one self-contained file.
+Download it and open it in a browser, then click a flow or any box.
+
+<a href="docs/images/topology-page.png"><img src="docs/images/topology-page.png" width="420" alt="The full lab topology page"></a>
 
 ## The challenges
 
@@ -152,14 +211,18 @@ sends the request there. Dynamo's own router isn't used.
 
 ```mermaid
 flowchart LR
-    c(["Client"]) --> vip["BNK VIP<br/>rate limit, metering"]
-    vip --> epp["BNK Endpoint Picker<br/>engine: dynamo"]
-    epp -->|"worker ID in the request"| w1["Worker 1<br/>Mocker + direct-mode frontend"]
-    epp -.->|"or"| w2["Worker 2<br/>Mocker + direct-mode frontend"]
-    w1 & w2 -->|"KV-cache events"| nats[("NATS")]
+    c(["💻 Client"]) ==> vip["BNK VIP<br/>rate limit · metering"]
+    vip ==> epp["BNK Endpoint Picker<br/>engine: dynamo"]
+    epp ==>|"request names worker 1"| w1["Worker 1<br/>Mocker + direct-mode frontend<br/>0.5 GPU"]
+    epp -.->|"or worker 2"| w2["Worker 2<br/>Mocker + direct-mode frontend<br/>0.5 GPU"]
+    w1 & w2 -->|"KV-cache stored / evicted"| nats[("NATS<br/>Dynamo tenants only")]
     nats -->|subscribe| epp
-```
 
+    classDef bnk fill:#fde8ea,stroke:#e4002b,color:#4a0010
+    classDef dyn fill:#f1e8fd,stroke:#8b4fd8,color:#24104a
+    class vip,epp bnk
+    class w1,w2,nats dyn
+```
 In the lab you send two long prompts six times each. Each one lands on the same worker all six
 times. NATS has no authentication, so a NetworkPolicy keeps everyone but Dynamo tenants off it. Without
 that, any pod could forge cache events and steer the picker. The notes are in
