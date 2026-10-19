@@ -21,6 +21,12 @@ real versus simulated list.</sub>
 [Dynamo](#dynamo-with-bnk-picking-the-worker) · [AI agent](#an-ai-agent-that-runs-it) ·
 [Real and simulated](#real-and-simulated) · [Repo map](#what-is-in-this-repo)
 
+> **Interactive packet-flow topology:** **[open it live](https://iracic82.github.io/bnk-runai-lab/platform/topology/topology.html)**.
+> Pick a flow (define a tenant, chat, over its share, cross-tenant route, Dynamo, token metering,
+> AI agent, delete) and watch the packets travel, step by step. Click any box to see what it is.
+> The architecture view of BNK inside NVIDIA's Run:ai stack is
+> [here](https://iracic82.github.io/bnk-runai-lab/docs/visuals/lab-topology.html).
+
 > **Tip:** every diagram below is live Mermaid. Hover it on GitHub to get zoom, pan and a full-screen
 > button.
 
@@ -174,9 +180,9 @@ flowchart LR
     class bc,tmm,pick d
     class models,dyn g
 ```
-There's an interactive version with an animated flow for each of the eight flows above:
-[`platform/topology/topology.html`](platform/topology/topology.html). It's one self-contained file.
-Download it and open it in a browser, then click a flow or any box.
+The interactive version animates each of the eight flows above:
+**[open the packet-flow topology](https://iracic82.github.io/bnk-runai-lab/platform/topology/topology.html)**
+(source: [`platform/topology/topology.html`](platform/topology/topology.html), one self-contained file).
 
 <a href="docs/images/topology-page.png"><img src="docs/images/topology-page.png" width="420" alt="The full lab topology page"></a>
 
