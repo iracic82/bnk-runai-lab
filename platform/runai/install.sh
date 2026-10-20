@@ -21,6 +21,18 @@ export RUNAI_ADMIN_PASSWORD="${RUNAI_ADMIN_PASSWORD:-Lab-Admin-1!}"
 INGRESS_NGINX_VERSION="${INGRESS_NGINX_VERSION:-controller-v1.12.3}"
 step() { echo; echo "==== $(date -u +%H:%M:%S) $*"; }
 
+# The control-plane chart pulls Bitnami subcharts (thanos, nats, common) from Docker Hub as OCI
+# artifacts. Helm does not go through containerd's credential, so it signs in here; anonymous it hit
+# "toomanyrequests" when hot-pool sandboxes booted together.
+if [ -n "${DOCKERHUB_PULL_TOKEN:-}" ]; then
+  printf '%s' "$DOCKERHUB_PULL_TOKEN" | helm registry login registry-1.docker.io \
+    --username "${DOCKERHUB_PULL_USER:-iracic82}" --password-stdin >/dev/null \
+    && echo "  helm signed in to Docker Hub as ${DOCKERHUB_PULL_USER:-iracic82}" \
+    || { echo "helm registry login to Docker Hub failed" >&2; exit 1; }
+else
+  echo "  WARNING: DOCKERHUB_PULL_TOKEN not set, Helm pulls Docker Hub charts anonymously" >&2
+fi
+
 step "Run:ai source @ ${RUNAI_REF} (charts and deploy functions only)"
 if [ ! -d "${RUNAI_SRC}/.git" ]; then
   git clone -q https://github.com/dsx-ai-factory/run-ai.git "$RUNAI_SRC"
@@ -83,6 +95,11 @@ use_hub_registry deploy_control_plane
 # The control plane's subcharts (Postgres, Keycloak, NATS) don't take a global nodeSelector, so the
 # release is not pinned; the runai node adds capacity for it and the scheduler spreads the pods.
 deploy_control_plane
+# NVIDIA's function ignores a failed `helm dependency build` and logs success after a failed install
+# (seen when Docker Hub refused the Bitnami subcharts), so check the release ourselves.
+[ "$(helm -n runai-backend status runai-backend -o json 2>/dev/null \
+     | python3 -c 'import sys,json;print(json.load(sys.stdin)["info"]["status"])' 2>/dev/null)" = deployed ] \
+  || { echo "Run:ai control plane chart did not install (helm release runai-backend not deployed)" >&2; exit 1; }
 
 step "register this cluster in the control plane (NVIDIA local-dev functions)"
 CP_CLUSTER_NAME=acme-ai-factory
