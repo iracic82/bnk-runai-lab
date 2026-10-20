@@ -19,7 +19,8 @@ tabs:
   hostname: control
   path: /topology.html
   port: 3002
-- title: Terminal 2
+- id: wszjrpkq9kxf
+  title: Terminal 2
   type: terminal
   hostname: control
 - id: azt7df3mf1qv
