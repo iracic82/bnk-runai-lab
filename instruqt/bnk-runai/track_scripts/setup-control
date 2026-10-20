@@ -54,7 +54,14 @@ step() { echo "==== $(date +%H:%M:%S) $*"; }
   step "browser for the Run:ai UI"
   bash "$LAB_ROOT/platform/browser/install.sh"
 } 2>&1 | tee /root/setup/lab.log
-[ "${PIPESTATUS[0]}" = 0 ] || fail "lab layer, see /root/setup/lab.log"
+if [ "${PIPESTATUS[0]}" != 0 ]; then
+  # Name what is stuck in the Instruqt log itself: pods not Running and their pull or start errors.
+  echo "==== pods not Running"
+  kubectl get pods -A --no-headers 2>/dev/null | awk '$4!="Running" && $4!="Completed"' || true
+  kubectl get events -A --field-selector type=Warning --sort-by=.lastTimestamp 2>/dev/null \
+    | grep -iE 'pull|image|back-off|toomanyrequests' | tail -15 || true
+  fail "lab layer, see /root/setup/lab.log"
+fi
 
 # kubectl works on every node, not only control.
 for n in dpu gpu runai; do

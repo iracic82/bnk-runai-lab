@@ -35,7 +35,8 @@ virtualmachines:
   shell: /bin/bash
 # Team secrets (write only): FAR_PULL_B64 F5 registry credential, BNK_LICENSE_JWT licence,
 # GH_READ_TOKEN read-only token for the private lab repo, LLM_API_KEY NVIDIA API key (build.nvidia.com)
-# for the MCP agent in challenge 6.
+# for the MCP agent in challenge 6. DOCKERHUB_PULL_TOKEN: read-only Docker Hub token for iracic82 (paid
+# plan), so image pulls are not held to the anonymous 100 per hour that hot-pool sandboxes share.
 secrets:
 - name: FAR_PULL_B64
   key: FAR_PULL_B64
@@ -45,3 +46,5 @@ secrets:
   key: GH_READ_TOKEN
 - name: LLM_API_KEY
   key: LLM_API_KEY
+- name: DOCKERHUB_PULL_TOKEN
+  key: DOCKERHUB_PULL_TOKEN

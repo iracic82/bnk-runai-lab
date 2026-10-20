@@ -168,6 +168,8 @@ prep_and_join() {
   {
     echo 'set -uo pipefail'; echo 'export DEBIAN_FRONTEND=noninteractive'
     echo "K8S_MINOR='${K8S_MINOR}'"
+    # Docker Hub pull credential for containerd (node-prep.sh dockerhub_auth); never echoed to the log.
+    printf "DOCKERHUB_PULL_USER=%q\nDOCKERHUB_PULL_TOKEN=%q\n" "${DOCKERHUB_PULL_USER:-iracic82}" "${DOCKERHUB_PULL_TOKEN:-}"
     cat "${PLATFORM}/cluster/node-prep.sh"
     echo "echo 'DPkg::Lock::Timeout \"900\";' > /etc/apt/apt.conf.d/99lab-lock-timeout"
     echo 'systemctl disable --now unattended-upgrades apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true'

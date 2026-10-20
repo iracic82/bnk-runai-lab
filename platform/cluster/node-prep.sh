@@ -61,10 +61,34 @@ SYS
   systemctl restart systemd-networkd || true
 }
 
+# Docker Hub limits anonymous pulls to 100 an hour per IP. One sandbox pulls about 60 images from
+# docker.io/iracic82, so hot-pool sandboxes sharing an egress IP ran out and setup failed on
+# ErrImagePull. Pulls signed in with the paid account have no limit. The Run:ai charts create pods
+# without imagePullSecrets, so the credential goes on the node, in containerd's CRI config.
+# containerd 2.2.1 reads registry.configs.<host>.auth whenever the kubelet sends no pull secret, also
+# with config_path set (internal/cri/server/images/image_pull.go, PullImage). The section is
+# deprecated but present in 2.2; it is gone in 2.3, so the node packages must stay on 2.2.
+dockerhub_auth() {
+  if [ -z "${DOCKERHUB_PULL_TOKEN:-}" ]; then
+    echo "  WARNING: DOCKERHUB_PULL_TOKEN not set, Docker Hub pulls are anonymous (100/hour per IP)"
+    return 0
+  fi
+  local cfg=/etc/containerd/config.toml
+  cat >> "$cfg" <<EOF
+
+[plugins.'io.containerd.cri.v1.images'.registry.configs.'registry-1.docker.io'.auth]
+  username = '${DOCKERHUB_PULL_USER:-iracic82}'
+  password = '${DOCKERHUB_PULL_TOKEN}'
+EOF
+  chmod 600 "$cfg"
+  echo "  Docker Hub pulls signed in as ${DOCKERHUB_PULL_USER:-iracic82}"
+}
+
 install_kubernetes() {
   step "Kubernetes ${K8S_MINOR} with containerd on $(hostname)"
   mkdir -p /etc/containerd && containerd config default > /etc/containerd/config.toml
   sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+  dockerhub_auth
   systemctl restart containerd
 
   mkdir -p /etc/apt/keyrings
