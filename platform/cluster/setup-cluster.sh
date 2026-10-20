@@ -358,18 +358,31 @@ LIC
   esac
 done
 [ -z "$lic_err" ] || fail "could not apply the License: ${lic_err}"
-for _ in $(seq 1 60); do
-  [ "$(kubectl get license.k8s.f5net.com f5-cne-cluster-license -n f5-cne-core -o jsonpath='{.status.state}' 2>/dev/null)" = "Active" ] && break
+lic_state=""
+for i in $(seq 1 60); do
+  lic_state="$(kubectl get license.k8s.f5net.com f5-cne-cluster-license -n f5-cne-core -o jsonpath='{.status.state}' 2>/dev/null)"
+  [ "$lic_state" = "Active" ] && { echo "  licence Active after $((i*5))s"; break; }
+  [ $((i % 6)) = 0 ] && echo "  licence state '${lic_state:-none}' after $((i*5))s"
   sleep 5
 done
+# TMM only starts once the licence is Active, so a licence that never activates would otherwise show
+# up 20 minutes later as a silent TMM timeout. Print what F5's licence object says and stop here.
+if [ "$lic_state" != "Active" ]; then
+  kubectl get license.k8s.f5net.com f5-cne-cluster-license -n f5-cne-core -o jsonpath='{.status}' 2>/dev/null; echo
+  fail "BNK licence not Active after 300s (state '${lic_state:-none}')"
+fi
 
 step "waiting for the TMM DaemonSet"
 for _ in $(seq 1 120); do
   kubectl get ds -n f5-bnk f5-tmm >/dev/null 2>&1 && \
     [ "$(kubectl get ds -n f5-bnk f5-tmm -o jsonpath='{.status.numberReady}' 2>/dev/null || echo 0)" -ge 1 ] && \
-    { echo "  f5-tmm ready"; break; }
+    { echo "  f5-tmm ready"; tmm_ok=1; break; }
   sleep 10
 done
+if [ -z "${tmm_ok:-}" ]; then
+  kubectl get ds -n f5-bnk f5-tmm 2>&1; kubectl get pods -n f5-bnk -o wide 2>&1 | grep -i tmm
+  fail "TMM DaemonSet not ready after 20 minutes"
+fi
 
 
 step "TMM VLANs + self-IPs (external-vlan 1.1, internal-vlan 1.2)"
